@@ -13,6 +13,7 @@ require (
 	github.com/Azure/go-ntlmssp v0.0.2-0.20251110135918-10b7b7e7cd26
 	github.com/Files-com/files-sdk-go/v3 v3.2.264
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
+	github.com/StarHack/go-internxt-drive v0.0.0-20250601204932-19be71b5a02f
 	github.com/a1ex3/zstd-seekable-format-go/pkg v0.10.0
 	github.com/a8m/tree v0.0.0-20240104212747-2c8764a5f17e
 	github.com/aalpar/deheap v0.0.0-20210914013432-0cc84d79dec3
