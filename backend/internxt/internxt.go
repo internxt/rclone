@@ -20,6 +20,13 @@ import (
 	"github.com/rclone/rclone/lib/dircache"
 )
 
+// Options holds configuration options for this interface
+type Options struct {
+	Endpoint string `flag:"endpoint" help:"API endpoint"`
+	Email    string `flag:"email"    help:"Internxt account email"`
+	Password string `flag:"password" help:"Internxt account password"`
+}
+
 // Register with Fs
 func init() {
 	fs.Register(&fs.RegInfo{
@@ -42,13 +49,6 @@ func init() {
 		}})
 }
 
-// Options holds configuration options for this interface
-type Options struct {
-	Endpoint string `flag:"endpoint" help:"API endpoint"`
-	Email    string `flag:"email"    help:"Internxt account email"`
-	Password string `flag:"password" help:"Internxt account password"`
-}
-
 // Fs represents an Internxt remote
 type Fs struct {
 	name           string
@@ -61,28 +61,6 @@ type Fs struct {
 	rootIsFile     bool
 	rootFile       *folders.File
 }
-
-// Name of the remote (as passed into NewFs)
-func (f *Fs) Name() string { return f.name }
-
-// Root of the remote (as passed into NewFs)
-func (f *Fs) Root() string { return f.root }
-
-// String converts this Fs to a string
-func (f *Fs) String() string { return f.name + ":" + f.root }
-
-// Features returns the optional features of this Fs
-func (f *Fs) Features() *fs.Features {
-	return &fs.Features{ReadMetadata: false, CanHaveEmptyDirectories: true}
-}
-
-// Hashes returns type of hashes supported by Internxt
-func (f *Fs) Hashes() hash.Set {
-	return hash.NewHashSet()
-}
-
-// Precision returns the precision of mtime that the server responds
-func (f *Fs) Precision() time.Duration { return time.Microsecond }
 
 // NewFs constructs an Fs from the path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
@@ -149,6 +127,28 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	return f, nil
 }
+
+// Name of the remote (as passed into NewFs)
+func (f *Fs) Name() string { return f.name }
+
+// Root of the remote (as passed into NewFs)
+func (f *Fs) Root() string { return f.root }
+
+// String converts this Fs to a string
+func (f *Fs) String() string { return f.name + ":" + f.root }
+
+// Features returns the optional features of this Fs
+func (f *Fs) Features() *fs.Features {
+	return &fs.Features{ReadMetadata: false, CanHaveEmptyDirectories: true}
+}
+
+// Hashes returns type of hashes supported by Internxt
+func (f *Fs) Hashes() hash.Set {
+	return hash.NewHashSet()
+}
+
+// Precision returns the precision of mtime that the server responds
+func (f *Fs) Precision() time.Duration { return time.Microsecond }
 
 // Mkdir creates a new directory
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
