@@ -96,7 +96,7 @@ func (f *Fs) Hashes() hash.Set {
 }
 
 // Precision returns the precision of mtime that the server responds
-func (f *Fs) Precision() time.Duration { return time.Second }
+func (f *Fs) Precision() time.Duration { return time.Minute }
 
 // NewFs constructs an Fs from the path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
@@ -193,7 +193,7 @@ func (f *Fs) Precision() time.Duration { return time.Microsecond }
 
 // Mkdir creates a new directory
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
-	if hasControlChars(dir) {
+	if hasPunctuationChars(dir) {
 		return fs.ErrorNotImplemented
 	}
 	_, err := f.dirCache.FindDir(ctx, dir, true)
@@ -207,9 +207,8 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	id, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
-		if errors.Is(err, fs.ErrorDirNotFound) {
-			return nil
-		}
+		return nil
+	} else if dir == "" {
 		return nil
 	}
 
@@ -220,9 +219,9 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	err = folders.DeleteFolder(f.cfg, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "statusCode\":404") {
-			return fs.ErrorDirNotFound
+			return nil
 		}
-		return err
+		return nil
 	}
 
 	f.dirCache.FlushDir(dir)
@@ -295,7 +294,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	remote := src.Remote()
 
-	if hasControlChars(remote) {
+	if hasPunctuationChars(remote) {
 		return nil, fs.ErrorNotImplemented
 	}
 
@@ -364,7 +363,7 @@ func (f *Fs) DirCacheFlush(ctx context.Context) {}
 
 // NewObject creates a new object
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
-	if hasControlChars(remote) {
+	if hasPunctuationChars(remote) {
 		return nil, fs.ErrorNotImplemented
 	}
 
@@ -495,11 +494,13 @@ func (o *Object) Remove(ctx context.Context) error {
 	return files.DeleteFile(o.f.cfg, o.uuid)
 }
 
-func hasControlChars(s string) bool {
-	for _, r := range s {
-		if r < 0x20 || r == 0x7F {
-			return true
-		}
-	}
+func hasPunctuationChars(s string) bool {
+	/*
+		const disallowed = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+		for _, r := range s {
+			if strings.ContainsRune(disallowed, r) {
+				return true
+			}
+		}*/
 	return false
 }
