@@ -208,8 +208,6 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	id, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return nil
-	} else if dir == "" {
-		return nil
 	}
 
 	if id == f.cfg.RootFolderID {
@@ -219,7 +217,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	err = folders.DeleteFolder(f.cfg, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "statusCode\":404") {
-			return nil
+			return fs.ErrorDirNotFound
 		}
 		return nil
 	}
