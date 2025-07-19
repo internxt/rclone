@@ -1,4 +1,4 @@
-package internxt_test
+package internxt
 
 import (
 	"context"
