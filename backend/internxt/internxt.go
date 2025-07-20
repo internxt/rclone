@@ -312,6 +312,10 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 		return nil, fs.ErrorFileNameTooLong
 	}
 
+	if src.Size() <= 0 {
+		return nil, fs.ErrorCantUploadEmptyFiles
+	}
+
 	parentDir, fileName := path.Split(remote)
 	parentDir = strings.Trim(parentDir, "/")
 
@@ -471,6 +475,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	parentDir, _ := path.Split(o.remote)
 	parentDir = strings.Trim(parentDir, "/")
 	parentDir = strings.ReplaceAll(parentDir, "\\", "%5C")
+
+	if src.Size() < 0 {
+		return fs.ErrorCantUploadEmptyFiles
+	}
+
 	folderUUID, err := o.f.dirCache.FindDir(ctx, parentDir, false)
 	if err != nil {
 		return err
