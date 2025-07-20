@@ -197,14 +197,17 @@ func (f *Fs) Precision() time.Duration { return time.Microsecond }
 // Mkdir creates a new directory
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	dir = strings.ReplaceAll(dir, "\\", "%5C")
+
 	id, err := f.dirCache.FindDir(ctx, dir, true)
-	if err != nil && strings.Contains(err.Error(), `"statusCode":400`) {
-		return nil
+	if err != nil {
+		if strings.Contains(err.Error(), `"statusCode":400`) {
+			return nil
+		}
+		return err
 	}
-	if err == nil {
-		f.dirCache.Put(dir, id)
-	}
-	return err
+
+	f.dirCache.Put(dir, id)
+	return nil
 }
 
 // Rmdir removes a directory
@@ -212,7 +215,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	id, err := f.dirCache.FindDir(ctx, dir, false)
 	if err == fs.ErrorDirNotFound {
 		if id, err = f.dirCache.FindDir(ctx, dir, true); err != nil {
-			return fs.ErrorDirNotFound
+			return nil
 		}
 	}
 	if err != nil {
@@ -227,7 +230,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	if err != nil {
 		if strings.Contains(err.Error(), "statusCode\":404") ||
 			strings.Contains(err.Error(), "directory not found") {
-			return fs.ErrorDirNotFound
+			err = fs.ErrorDirNotFound
 		}
 		return err
 	}
@@ -381,9 +384,9 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	parentDir, fileName := path.Split(remote)
 	parentDir = strings.Trim(parentDir, "/")
 	parentDir = strings.ReplaceAll(parentDir, "\\", "%5C")
-	dirID, err := f.dirCache.FindDir(ctx, parentDir, false)
+	dirID, err := f.dirCache.FindDir(ctx, parentDir, true)
 	if err != nil {
-		return nil, err
+		return nil, fs.ErrorObjectNotFound
 	}
 	files, err := folders.ListFiles(f.cfg, dirID, folders.ListOptions{})
 	if err != nil {
