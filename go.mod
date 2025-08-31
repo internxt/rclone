@@ -14,6 +14,7 @@ require (
 	github.com/Files-com/files-sdk-go/v3 v3.2.264
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/a1ex3/zstd-seekable-format-go/pkg v0.10.0
+	github.com/StarHack/go-internxt-drive v0.0.0-20250506081634-548256aeb125
 	github.com/a8m/tree v0.0.0-20240104212747-2c8764a5f17e
 	github.com/aalpar/deheap v0.0.0-20210914013432-0cc84d79dec3
 	github.com/abbot/go-http-auth v0.4.0
@@ -269,9 +270,9 @@ require (
 )
 
 require (
-	github.com/IBM/go-sdk-core/v5 v5.21.0
-	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/ProtonMail/go-crypto v1.3.0
+	github.com/IBM/go-sdk-core/v5 v5.18.5
+	github.com/Microsoft/go-winio v0.6.1 // indirect
+	github.com/ProtonMail/go-crypto v1.2.0
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/pkg/xattr v0.4.12
 	github.com/pquerna/otp v1.5.0
