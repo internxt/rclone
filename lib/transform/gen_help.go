@@ -33,7 +33,7 @@ var commandList = []commands{
 	{command: "--name-transform suffix_keep_extension=XXXX", description: "Appends XXXX to the file name while preserving the original file extension."},
 	{command: "--name-transform trimprefix=XXXX", description: "Removes XXXX if it appears at the start of the file name."},
 	{command: "--name-transform trimsuffix=XXXX", description: "Removes XXXX if it appears at the end of the file name."},
-	{command: "--name-transform regex=/pattern/replacement/", description: "Applies a regex-based transformation."},
+	{command: "--name-transform regex=pattern/replacement", description: "Applies a regex-based transformation."},
 	{command: "--name-transform replace=old:new", description: "Replaces occurrences of old with new in the file name."},
 	{command: "--name-transform date={YYYYMMDD}", description: "Appends or prefixes the specified date format."},
 	{command: "--name-transform truncate=N", description: "Truncates the file name to a maximum of N characters."},
@@ -97,7 +97,7 @@ func (e example) output() string {
 func sprintExamples() string {
 	s := "Examples:\n"
 	for _, e := range examples {
-		s += fmt.Sprintf("\n```sh\n%s\n", e.command())
+		s += fmt.Sprintf("\n```console\n%s\n", e.command())
 		s += fmt.Sprintf("// Output: %s\n```\n", e.output())
 	}
 	return s
