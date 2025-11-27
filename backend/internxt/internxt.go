@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/StarHack/go-internxt-drive/auth"
-	"github.com/StarHack/go-internxt-drive/buckets"
-	config "github.com/StarHack/go-internxt-drive/config"
-	"github.com/StarHack/go-internxt-drive/files"
-	"github.com/StarHack/go-internxt-drive/folders"
-	"github.com/StarHack/go-internxt-drive/users"
+	"github.com/internxt/rclone-adapter/auth"
+	"github.com/internxt/rclone-adapter/buckets"
+	config "github.com/internxt/rclone-adapter/config"
+	"github.com/internxt/rclone-adapter/files"
+	"github.com/internxt/rclone-adapter/folders"
+	"github.com/internxt/rclone-adapter/users"
 	"github.com/rclone/rclone/fs"
 	rclone_config "github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -706,7 +706,15 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	meta, err := buckets.UploadFileStream(o.f.cfg, dirID, o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)), in, src.Size(), src.ModTime(ctx))
+	// Use auto-upload (automatically chooses single-part or multipart based on size)
+	meta, err := buckets.UploadFileStreamAuto(
+		o.f.cfg,
+		dirID,
+		o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)),
+		in,
+		src.Size(),
+		src.ModTime(ctx),
+	)
 	if err != nil {
 		return err
 	}
@@ -714,6 +722,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	// Update the object with the new info
 	o.uuid = meta.UUID
 	o.size = src.Size()
+
 	// If this is a simulated empty file set fake size to 0
 	if isEmptyFile {
 		o.size = 0
