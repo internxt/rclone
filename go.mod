@@ -14,7 +14,6 @@ require (
 	github.com/Files-com/files-sdk-go/v3 v3.2.264
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/a1ex3/zstd-seekable-format-go/pkg v0.10.0
-	github.com/StarHack/go-internxt-drive v0.0.0-20250506081634-548256aeb125
 	github.com/a8m/tree v0.0.0-20240104212747-2c8764a5f17e
 	github.com/aalpar/deheap v0.0.0-20210914013432-0cc84d79dec3
 	github.com/abbot/go-http-auth v0.4.0
@@ -45,6 +44,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/henrybear327/Proton-API-Bridge v1.0.0
 	github.com/henrybear327/go-proton-api v1.0.0
+	github.com/internxt/rclone-adapter v0.0.0-20251128125449-40f1a8e381e7
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/jlaffaye/ftp v0.2.1-0.20240918233326-1b970516f5d3
 	github.com/josephspurrier/goversioninfo v1.5.0
@@ -242,6 +242,7 @@ require (
 	github.com/tinylib/msgp v1.5.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
+	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/willscott/go-nfs-client v0.0.0-20251022144359-801f10d98886 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
@@ -255,13 +256,13 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
+	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	moul.io/http2curl/v2 v2.3.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 	storj.io/common v0.0.0-20251107171817-6221ae45072c // indirect
 	storj.io/drpc v0.0.35-0.20250513201419-f7819ea69b55 // indirect
 	storj.io/eventkit v0.0.0-20250410172343-61f26d3de156 // indirect
