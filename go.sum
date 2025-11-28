@@ -89,9 +89,6 @@ github.com/ProtonMail/gopenpgp/v2 v2.9.0 h1:ruLzBmwe4dR1hdnrsEJ/S7psSBmV15gFttFU
 github.com/ProtonMail/gopenpgp/v2 v2.9.0/go.mod h1:IldDyh9Hv1ZCCYatTuuEt1XZJ0OPjxLpTarDfglih7s=
 github.com/PuerkitoBio/goquery v1.10.3 h1:pFYcNSqHxBD06Fpj/KsbStFRsgRATgnf3LeXiUkhzPo=
 github.com/PuerkitoBio/goquery v1.10.3/go.mod h1:tMUX0zDMHXYlAQk6p35XxQMqMweEKB7iK7iLNd4RH4Y=
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 github.com/STARRY-S/zip v0.2.3 h1:luE4dMvRPDOWQdeDdUxUoZkzUIpTccdKdhHHsQJ1fm4=
 github.com/STARRY-S/zip v0.2.3/go.mod h1:lqJ9JdeRipyOQJrYSOtpNAiaesFO6zVDsE8GIGFaoSk=
 github.com/StarHack/go-internxt-drive v0.0.0-20250601204932-19be71b5a02f h1:rNfLDmFAhYD+jjP4w9PwP+57Vflee6lMaHAqt8yoqCM=
