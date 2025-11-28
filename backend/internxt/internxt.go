@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/internxt/rclone-adapter/auth"
 	"github.com/internxt/rclone-adapter/buckets"
 	config "github.com/internxt/rclone-adapter/config"
 	"github.com/internxt/rclone-adapter/files"
@@ -22,7 +21,6 @@ import (
 	rclone_config "github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
-	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
@@ -32,36 +30,18 @@ import (
 func init() {
 	fs.Register(&fs.RegInfo{
 		Name:        "internxt",
-		Description: "internxt",
+		Description: "Internxt Drive",
 		NewFs:       NewFs,
 		Options: []fs.Option{
-			{
-				Name:      "email",
-				Default:   "",
-				Help:      "The email of the user to operate as.",
-				Sensitive: true,
-			},
-			{
-				Name:       "password",
-				Default:    "",
-				Help:       "The password for the user.",
-				IsPassword: true,
-			},
 			{
 				Name:    "simulateEmptyFiles",
 				Default: false,
 				Help:    "Simulates empty files by uploading a small placeholder file instead. Alters the filename when uploading to keep track of empty files, but this is not visible through rclone.",
 			},
 			{
-				Name:    "use_2fa",
-				Help:    "Do you use 2FA to login?",
-				Default: false,
-			},
-			{
 				Name:     rclone_config.ConfigEncoding,
 				Help:     rclone_config.ConfigEncodingHelp,
 				Advanced: true,
-
 				Default: encoder.EncodeInvalidUtf8 |
 					encoder.EncodeSlash |
 					encoder.EncodeBackSlash |
@@ -82,24 +62,18 @@ var (
 
 // Options holds configuration options for this interface
 type Options struct {
-	Endpoint           string               `flag:"endpoint" help:"API endpoint"`
-	Email              string               `flag:"email"    help:"Internxt account email"`
-	Password           string               `flag:"password" help:"Internxt account password"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
 	SimulateEmptyFiles bool                 `config:"simulateEmptyFiles"`
-	Use2FA             bool                 `config:"use_2fa" help:"Do you use 2FA to login?"`
 }
 
 // Fs represents an Internxt remote
 type Fs struct {
-	name           string
-	root           string
-	opt            Options
-	dirCache       *dircache.DirCache
-	cfg            *config.Config
-	loginResponse  *auth.LoginResponse
-	accessResponse *auth.AccessResponse
-	features       *fs.Features
+	name     string
+	root     string
+	opt      Options
+	dirCache *dircache.DirCache
+	cfg      *config.Config
+	features *fs.Features
 }
 
 // Object holds the data for a remote file object
@@ -133,7 +107,6 @@ func (f *Fs) Hashes() hash.Set {
 
 // Precision return the precision of this Fs
 func (f *Fs) Precision() time.Duration {
-	//return time.Minute
 	return fs.ModTimeNotSupported
 }
 
@@ -143,87 +116,46 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	if err := configstruct.Set(m, opt); err != nil {
 		return nil, err
 	}
-	clearPassword, err := obscure.Reveal(opt.Password)
-	if err != nil {
-		return nil, err
-	}
-	cfg := config.NewDefault(opt.Email, clearPassword)
-	loginResponse, err := auth.Login(cfg)
-	if err != nil {
-		return nil, err
-	}
 
-	if opt.Use2FA {
-		fmt.Print("Enter your 2FA code: ")
-		var code string
-		_, err := fmt.Scanln(&code)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read 2FA code: %w", err)
-		}
-		cfg.TFA = code
-	}
-
-	accessResponse, err := auth.AccessLogin(cfg, loginResponse)
-	if err != nil {
-		return nil, err
-	}
+	// TODO: Implement proper token-based authentication
+	cfg := &config.Config{}
 
 	f := &Fs{
-		name:           name,
-		root:           root,
-		opt:            *opt,
-		cfg:            cfg,
-		loginResponse:  loginResponse,
-		accessResponse: accessResponse,
+		name: name,
+		root: strings.Trim(root, "/"),
+		opt:  *opt,
+		cfg:  cfg,
 	}
 
 	f.features = (&fs.Features{
-		ReadMimeType:      false,
-		WriteMimeType:     false,
-		BucketBased:       false,
-		BucketBasedRootOK: false,
-		//ChunkWriterDoesntSeek:    false,
-		WriteDirSetModTime:       false,
-		WriteMetadata:            false,
-		WriteDirMetadata:         false,
-		ReadMetadata:             false,
-		CanHaveEmptyDirectories:  true,
-		IsLocal:                  false,
-		DirModTimeUpdatesOnWrite: false,
+		CanHaveEmptyDirectories: true,
 	}).Fill(ctx, f)
 
-	// Handle leading and trailing slashes
-	root = strings.Trim(root, "/")
-	f.dirCache = dircache.New(root, cfg.RootFolderID, f)
+	f.dirCache = dircache.New(f.root, cfg.RootFolderID, f)
 
-	err = f.dirCache.FindRoot(ctx, false)
+	err := f.dirCache.FindRoot(ctx, false)
 	if err != nil {
-
-		// Assume it is a file
-		newRoot, remote := dircache.SplitPath(root)
-
+		// Assume it might be a file
+		newRoot, remote := dircache.SplitPath(f.root)
 		tempF := *f
 		tempF.dirCache = dircache.New(newRoot, f.cfg.RootFolderID, &tempF)
 		tempF.root = newRoot
-		// Make new Fs which is the parent
+
 		err = tempF.dirCache.FindRoot(ctx, false)
 		if err != nil {
-			// No root so return old f
 			return f, nil
 		}
+
 		_, err := tempF.NewObject(ctx, remote)
 		if err != nil {
 			if err == fs.ErrorObjectNotFound {
-				// File doesn't exist so return old f
 				return f, nil
 			}
-
 			return nil, err
 		}
 
 		f.dirCache = tempF.dirCache
 		f.root = tempF.root
-		// return an error with an fs which points to the parent
 		return f, fs.ErrorIsFile
 	}
 
@@ -237,8 +169,8 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 		return err
 	}
 
-	f.dirCache.Put(dir, id)            // Is this done automatically by FindDir with create == true?
-	time.Sleep(500 * time.Millisecond) //REMOVE THIS, use pacer to check for consistency?
+	f.dirCache.Put(dir, id)
+	time.Sleep(500 * time.Millisecond)
 
 	return nil
 }
@@ -246,48 +178,34 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 // Rmdir removes a directory
 // Returns an error if it isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	return f.purgeCheck(ctx, dir, true)
-}
-
-// Purge deletes the directory and all its contents
-func (f *Fs) Purge(ctx context.Context, dir string) error {
-	return f.purgeCheck(ctx, dir, false)
-}
-
-func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) (err error) {
 	root := path.Join(f.root, dir)
 	if root == "" {
-		return errors.New("can't purge root directory")
+		return errors.New("cannot remove root directory")
 	}
 
-	// check that the directory exists
 	id, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return fs.ErrorDirNotFound
 	}
 
-	if check {
-		// Replace these calls with GetFolderContent? (fmt.Sprintf("/storage/v2/folder/%d%s", folderID, query))
-		// Check folders and files separately in case we only need to call the API once.
-		childFolders, err := folders.ListAllFolders(f.cfg, id)
-		if err != nil {
-			return err
-		}
-
-		if len(childFolders) > 0 {
-			return fs.ErrorDirectoryNotEmpty
-		}
-
-		childFiles, err := folders.ListAllFiles(f.cfg, id)
-		if err != nil {
-			return err
-		}
-
-		if len(childFiles) > 0 {
-			return fs.ErrorDirectoryNotEmpty
-		}
+	// Check if directory is empty
+	childFolders, err := folders.ListAllFolders(f.cfg, id)
+	if err != nil {
+		return err
+	}
+	if len(childFolders) > 0 {
+		return fs.ErrorDirectoryNotEmpty
 	}
 
+	childFiles, err := folders.ListAllFiles(f.cfg, id)
+	if err != nil {
+		return err
+	}
+	if len(childFiles) > 0 {
+		return fs.ErrorDirectoryNotEmpty
+	}
+
+	// Delete the directory
 	err = folders.DeleteFolder(f.cfg, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
@@ -297,15 +215,13 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) (err error)
 	}
 
 	f.dirCache.FlushDir(dir)
-	time.Sleep(500 * time.Millisecond) // REMOVE THIS, use pacer to check for consistency?
+	time.Sleep(500 * time.Millisecond)
 	return nil
-
 }
 
 // FindLeaf looks for a sub‑folder named `leaf` under the Internxt folder `pathID`.
 // If found, it returns its UUID and true. If not found, returns "", false.
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	//fmt.Printf("FindLeaf pathID: %s, leaf: %s\n", pathID, leaf)
 	entries, err := folders.ListAllFolders(f.cfg, pathID)
 	if err != nil {
 		return "", false, err
@@ -329,7 +245,7 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error)
 		return "", fmt.Errorf("can't create folder, %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond) // REMOVE THIS, use pacer to check for consistency?
+	time.Sleep(500 * time.Millisecond)
 	return resp.UUID, nil
 }
 
@@ -409,127 +325,10 @@ func (f *Fs) Remove(ctx context.Context, remote string) error {
 	return nil
 }
 
-// Move src to this remote using server-side move operations.
-func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	srcObj, ok := src.(*Object)
-	if !ok {
-		fs.Debugf(src, "Can't move - not same remote type")
-		return nil, fs.ErrorCantMove
-	}
-
-	srcLeaf, srcDirectoryID, err := f.dirCache.FindPath(ctx, srcObj.remote, false)
-	if err != nil {
-		return nil, err
-	}
-
-	dstLeaf, dstDirectoryID, err := f.dirCache.FindPath(ctx, remote, true)
-	if err != nil {
-		return nil, err
-	}
-
-	doMove := srcDirectoryID != dstDirectoryID
-	doRename := srcLeaf != dstLeaf
-
-	var dstObj fs.Object
-
-	// If we're doing both, we should rename to a temp name in case there's a file
-	// with the same name at the destination folder (we can't rename AND move with one call)
-	if doMove && doRename {
-		newFile, err := files.UpdateFileMeta(f.cfg, srcObj.uuid, &folders.File{Type: "__RCLONE_MOVE__"})
-		if err != nil {
-			return nil, err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-		dstObj = newObjectWithFile(f, remote, newFile)
-	}
-
-	if doMove {
-		newFile, err := files.MoveFile(f.cfg, srcObj.uuid, dstDirectoryID)
-		if err != nil {
-			return nil, err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-		dstObj = newObjectWithFile(f, remote, newFile)
-	}
-
-	if doRename {
-		base := filepath.Base(remote)
-		name := strings.TrimSuffix(base, filepath.Ext(base))
-		ext := strings.TrimPrefix(filepath.Ext(base), ".")
-
-		updated := &folders.File{
-			PlainName: f.opt.Encoding.FromStandardName(name),
-			Type:      f.opt.Encoding.FromStandardName(ext),
-		}
-
-		newFile, err := files.UpdateFileMeta(f.cfg, srcObj.uuid, updated)
-		if err != nil {
-			return nil, err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-		dstObj = newObjectWithFile(f, remote, newFile)
-	}
-
-	return dstObj, nil
-}
-
-// Move dir to destination using server-side move operations.
-func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
-	srcFs, ok := src.(*Fs)
-	if !ok {
-		fs.Debugf(srcFs, "Can't move directory - not same remote type")
-		return fs.ErrorCantDirMove
-	}
-
-	srcID, _, srcLeaf, dstDirectoryID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
-	if err != nil {
-		return err
-	}
-
-	doMove := srcID != dstDirectoryID
-	doRename := srcLeaf != dstLeaf
-
-	// If we're moving AND renaming we need to set a temp name first, else we risk collisions
-	if doMove && doRename {
-		err = folders.RenameFolder(f.cfg, srcID, f.opt.Encoding.FromStandardName(dstLeaf+".__RCLONE_MOVE__"))
-		if err != nil {
-			return err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-	}
-
-	if doMove {
-		err = folders.MoveFolder(f.cfg, srcID, dstDirectoryID)
-		if err != nil && !strings.Contains(err.Error(), "409") {
-			return err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-
-	}
-
-	if doRename {
-		err = folders.RenameFolder(f.cfg, srcID, f.opt.Encoding.FromStandardName(dstLeaf))
-		if err != nil && !strings.Contains(err.Error(), "409") {
-			return err
-		}
-		time.Sleep(500 * time.Millisecond) //Find a way around this
-	}
-
-	srcFs.dirCache.FlushDir(srcRemote)
-	return nil
-}
-
-// Copy copies a directory (not implemented)
-func (f *Fs) Copy(ctx context.Context, src, dst fs.Object) error {
-	// return f.client.Copy(ctx, f.root+src.Remote(), f.root+dst.Remote())
-	return fs.ErrorCantCopy
-}
-
 // NewObject creates a new object
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	parentDir := filepath.Dir(remote)
 
-	//Is this needed?
 	if parentDir == "." {
 		parentDir = ""
 	}
@@ -724,6 +523,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 // Remove deletes a file
 func (o *Object) Remove(ctx context.Context) error {
 	err := files.DeleteFile(o.f.cfg, o.uuid)
-	time.Sleep(500 * time.Millisecond) // REMOVE THIS, use pacer to check for consistency?
+	time.Sleep(500 * time.Millisecond)
 	return err
 }
