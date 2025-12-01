@@ -32,7 +32,18 @@ func init() {
 		Name:        "internxt",
 		Description: "Internxt Drive",
 		NewFs:       NewFs,
+		Config:      Config,
 		Options: []fs.Option{
+			{
+				Name:       "token",
+				Help:       "Internxt auth token (JWT).\n\nLeave blank to trigger interactive login.",
+				IsPassword: true,
+			},
+			{
+				Name:       "mnemonic",
+				Help:       "Internxt encryption mnemonic.\n\nLeave blank to trigger interactive login.",
+				IsPassword: true,
+			},
 			{
 				Name:    "simulateEmptyFiles",
 				Default: false,
@@ -52,6 +63,67 @@ func init() {
 	)
 }
 
+// Config implements the interactive configuration flow
+func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.ConfigIn) (*fs.ConfigOut, error) {
+	token, tokenOK := m.Get("token")
+	mnemonic, mnemonicOK := m.Get("mnemonic")
+
+	switch configIn.State {
+	case "":
+		// Check if we already have valid credentials
+		if tokenOK && mnemonicOK && token != "" && mnemonic != "" {
+			// Check if token needs refresh
+			needsRefresh, err := tokenNeedsRefresh(token)
+			if err != nil {
+				fs.Debugf(nil, "Failed to check token expiry: %v", err)
+				return fs.ConfigGoto("reauth")
+			}
+
+			if needsRefresh {
+				fs.Logf(nil, "Token expires soon, attempting refresh...")
+				newToken, err := refreshToken(ctx, token)
+				if err != nil {
+					fs.Errorf(nil, "Failed to refresh token: %v", err)
+					return fs.ConfigConfirm("reauth", true, "config_reauth",
+						"Token refresh failed. Re-authenticate?")
+				}
+				m.Set("token", newToken)
+				fs.Logf(nil, "Token refreshed successfully")
+				return nil, nil
+			}
+
+			return fs.ConfigConfirm("reauth", false, "config_reauth",
+				"Already authenticated. Re-authenticate?")
+		}
+
+		return fs.ConfigGoto("auth")
+
+	case "reauth":
+		if configIn.Result == "false" {
+			return nil, nil
+		}
+		return fs.ConfigGoto("auth")
+
+	case "auth":
+		newToken, newMnemonic, err := doAuth(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+
+		// Store credentials in config
+		m.Set("token", newToken)
+		m.Set("mnemonic", newMnemonic)
+
+		fs.Logf(nil, "")
+		fs.Logf(nil, "Success! Authentication complete.")
+		fs.Logf(nil, "")
+
+		return nil, nil
+	}
+
+	return nil, fmt.Errorf("unknown state %q", configIn.State)
+}
+
 const (
 	EMPTY_FILE_EXT = ".__RCLONE_EMPTY__"
 )
@@ -62,6 +134,8 @@ var (
 
 // Options holds configuration options for this interface
 type Options struct {
+	Token              string               `config:"token"`
+	Mnemonic           string               `config:"mnemonic"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
 	SimulateEmptyFiles bool                 `config:"simulateEmptyFiles"`
 }
@@ -117,8 +191,20 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
-	// TODO: Implement proper token-based authentication
-	cfg := &config.Config{}
+	if opt.Token == "" || opt.Mnemonic == "" {
+		return nil, errors.New("token and mnemonic are required - please run: rclone config reconnect " + name + ":")
+	}
+
+	cfg := config.NewDefaultToken(opt.Token)
+	cfg.Mnemonic = opt.Mnemonic
+
+	userInfo, err := getUserInfo(ctx, &userInfoConfig{Token: cfg.Token})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch user info: %w", err)
+	}
+
+	cfg.RootFolderID = userInfo.RootFolderID
+	cfg.Bucket = userInfo.Bucket
 
 	f := &Fs{
 		name: name,
@@ -133,7 +219,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	f.dirCache = dircache.New(f.root, cfg.RootFolderID, f)
 
-	err := f.dirCache.FindRoot(ctx, false)
+	err = f.dirCache.FindRoot(ctx, false)
 	if err != nil {
 		// Assume it might be a file
 		newRoot, remote := dircache.SplitPath(f.root)
