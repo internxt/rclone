@@ -505,7 +505,15 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	meta, err := buckets.UploadFileStream(o.f.cfg, dirID, o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)), in, src.Size(), src.ModTime(ctx))
+	meta, err := buckets.UploadFileStreamAuto(
+		o.f.cfg,
+		dirID,
+		o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)),
+		in,
+		src.Size(),
+		src.ModTime(ctx),
+	)
+
 	if err != nil {
 		return err
 	}
