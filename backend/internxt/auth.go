@@ -4,7 +4,6 @@ package internxt
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -12,13 +11,16 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	internxtauth "github.com/internxt/rclone-adapter/auth"
+	internxtconfig "github.com/internxt/rclone-adapter/config"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/lib/oauthutil"
+	"golang.org/x/oauth2"
 )
 
 const (
 	driveWebURL      = "https://drive.internxt.com"
-	refreshURL       = "https://gateway.internxt.com/drive/users/refresh"
 	defaultLocalPort = "53682"
 	bindAddress      = "127.0.0.1:" + defaultLocalPort
 	tokenExpiry2d    = 48 * time.Hour
@@ -152,94 +154,24 @@ func doAuth(ctx context.Context) (token, mnemonic string, err error) {
 
 		fs.Logf(nil, "SSO login successful, refreshing token to fetch user data...")
 
-		refreshedToken, _, err := refreshTokenAndGetBucket(ctx, result.token)
+		cfg := internxtconfig.NewDefaultToken(result.token)
+		resp, err := internxtauth.RefreshToken(ctx, cfg)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to refresh token: %w", err)
 		}
 
+		if resp.NewToken == "" {
+			return "", "", errors.New("refresh response missing newToken")
+		}
+
 		fs.Logf(nil, "Authentication successful!")
-		return refreshedToken, result.mnemonic, nil
+		return resp.NewToken, result.mnemonic, nil
 
 	case <-time.After(5 * time.Minute):
 		return "", "", errors.New("authentication timeout after 5 minutes")
 	}
 }
 
-func tokenNeedsRefresh(tokenString string) (bool, error) {
-	if tokenString == "" {
-		return true, nil
-	}
-
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, _, err := parser.ParseUnverified(tokenString, jwt.MapClaims{})
-	if err != nil {
-		return true, fmt.Errorf("failed to parse token: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return true, errors.New("invalid token claims")
-	}
-
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		return true, errors.New("token missing expiration")
-	}
-
-	expiryTime := time.Unix(int64(exp), 0)
-	timeUntilExpiry := time.Until(expiryTime)
-
-	// Refresh if expiring within 2 days
-	return timeUntilExpiry < tokenExpiry2d, nil
-}
-
-func refreshToken(ctx context.Context, oldToken string) (string, error) {
-	newToken, _, err := refreshTokenAndGetBucket(ctx, oldToken)
-	return newToken, err
-}
-
-func refreshTokenAndGetBucket(ctx context.Context, oldToken string) (newToken, bucket string, err error) {
-	if oldToken == "" {
-		return "", "", errors.New("cannot refresh empty token")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, refreshURL, nil)
-	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+oldToken)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("refresh request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("refresh failed with status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		NewToken string `json:"newToken"`
-		User     struct {
-			Bucket string `json:"bucket"`
-		} `json:"user"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", fmt.Errorf("failed to parse refresh response: %w", err)
-	}
-
-	if result.NewToken == "" {
-		return "", "", errors.New("refresh response missing newToken")
-	}
-
-	if result.User.Bucket == "" {
-		return "", "", errors.New("refresh response missing user.bucket")
-	}
-
-	return result.NewToken, result.User.Bucket, nil
-}
 
 type userInfo struct {
 	RootFolderID string
@@ -286,12 +218,92 @@ func getUserInfo(ctx context.Context, cfg *userInfoConfig) (*userInfo, error) {
 		return nil, errors.New("could not find rootFolderId/uuid in JWT token")
 	}
 
-	_, bucket, err := refreshTokenAndGetBucket(ctx, cfg.Token)
+	refreshCfg := internxtconfig.NewDefaultToken(cfg.Token)
+	resp, err := internxtauth.RefreshToken(ctx, refreshCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bucket: %w", err)
 	}
-	info.Bucket = bucket
+
+	if resp.User.Bucket == "" {
+		return nil, errors.New("refresh response missing user.bucket")
+	}
+
+	info.Bucket = resp.User.Bucket
 
 	fs.Debugf(nil, "User info: rootFolderId=%s, bucket=%s", info.RootFolderID, info.Bucket)
 	return info, nil
+}
+
+// parseJWTExpiry extracts the expiry time from a JWT token string
+func parseJWTExpiry(tokenString string) (time.Time, error) {
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return time.Time{}, errors.New("invalid token claims")
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}, errors.New("token missing expiration")
+	}
+
+	return time.Unix(int64(exp), 0), nil
+}
+
+// jwtToOAuth2Token converts a JWT string to an oauth2.Token with expiry
+func jwtToOAuth2Token(jwtString string) (*oauth2.Token, error) {
+	expiry, err := parseJWTExpiry(jwtString)
+	if err != nil {
+		return nil, err
+	}
+
+	return &oauth2.Token{
+		AccessToken: jwtString,
+		TokenType:   "Bearer",
+		Expiry:      expiry,
+	}, nil
+}
+
+// refreshJWTToken refreshes the token using Internxt's refresh endpoint
+func refreshJWTToken(ctx context.Context, name string, m configmap.Mapper) error {
+	currentToken, err := oauthutil.GetToken(name, m)
+	if err != nil {
+		return fmt.Errorf("failed to get current token: %w", err)
+	}
+
+	mnemonic, _ := m.Get("mnemonic")
+
+	cfg := internxtconfig.NewDefaultToken(currentToken.AccessToken)
+	resp, err := internxtauth.RefreshToken(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("refresh request failed: %w", err)
+	}
+
+	if resp.NewToken == "" {
+		return errors.New("refresh response missing newToken")
+	}
+
+	// Convert JWT to oauth2.Token format
+	token, err := jwtToOAuth2Token(resp.NewToken)
+	if err != nil {
+		return fmt.Errorf("failed to parse refreshed token: %w", err)
+	}
+
+	err = oauthutil.PutToken(name, m, token, false)
+	if err != nil {
+		return fmt.Errorf("failed to save token: %w", err)
+	}
+
+	if resp.User.Bucket != "" {
+		m.Set("bucket", resp.User.Bucket)
+	}
+	m.Set("mnemonic", mnemonic)
+
+	fs.Debugf(name, "Token refreshed successfully, new expiry: %v", token.Expiry)
+	return nil
 }

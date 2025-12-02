@@ -24,6 +24,7 @@ import (
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
+	"github.com/rclone/rclone/lib/oauthutil"
 )
 
 // Register with Fs
@@ -65,29 +66,28 @@ func init() {
 
 // Config implements the interactive configuration flow
 func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.ConfigIn) (*fs.ConfigOut, error) {
-	token, tokenOK := m.Get("token")
+	_, tokenOK := m.Get("token")
 	mnemonic, mnemonicOK := m.Get("mnemonic")
 
 	switch configIn.State {
 	case "":
 		// Check if we already have valid credentials
-		if tokenOK && mnemonicOK && token != "" && mnemonic != "" {
-			// Check if token needs refresh
-			needsRefresh, err := tokenNeedsRefresh(token)
+		if tokenOK && mnemonicOK && mnemonic != "" {
+			// Get oauth2.Token from config
+			oauthToken, err := oauthutil.GetToken(name, m)
 			if err != nil {
-				fs.Debugf(nil, "Failed to check token expiry: %v", err)
+				fs.Errorf(nil, "Failed to get token: %v", err)
 				return fs.ConfigGoto("reauth")
 			}
 
-			if needsRefresh {
+			if time.Until(oauthToken.Expiry) < tokenExpiry2d {
 				fs.Logf(nil, "Token expires soon, attempting refresh...")
-				newToken, err := refreshToken(ctx, token)
+				err := refreshJWTToken(ctx, name, m)
 				if err != nil {
 					fs.Errorf(nil, "Failed to refresh token: %v", err)
 					return fs.ConfigConfirm("reauth", true, "config_reauth",
 						"Token refresh failed. Re-authenticate?")
 				}
-				m.Set("token", newToken)
 				fs.Logf(nil, "Token refreshed successfully")
 				return nil, nil
 			}
@@ -110,9 +110,19 @@ func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.Co
 			return nil, fmt.Errorf("authentication failed: %w", err)
 		}
 
-		// Store credentials in config
-		m.Set("token", newToken)
+		// Store mnemonic
 		m.Set("mnemonic", newMnemonic)
+
+		// Store token in oauth2 format
+		oauthToken, err := jwtToOAuth2Token(newToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create oauth2 token: %w", err)
+		}
+
+		err = oauthutil.PutToken(name, m, oauthToken, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save token: %w", err)
+		}
 
 		fs.Logf(nil, "")
 		fs.Logf(nil, "Success! Authentication complete.")
@@ -142,12 +152,13 @@ type Options struct {
 
 // Fs represents an Internxt remote
 type Fs struct {
-	name     string
-	root     string
-	opt      Options
-	dirCache *dircache.DirCache
-	cfg      *config.Config
-	features *fs.Features
+	name         string
+	root         string
+	opt          Options
+	dirCache     *dircache.DirCache
+	cfg          *config.Config
+	features     *fs.Features
+	tokenRenewer *oauthutil.Renew
 }
 
 // Object holds the data for a remote file object
@@ -191,12 +202,27 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
-	if opt.Token == "" || opt.Mnemonic == "" {
-		return nil, errors.New("token and mnemonic are required - please run: rclone config reconnect " + name + ":")
+	if opt.Mnemonic == "" {
+		return nil, errors.New("mnemonic is required - please run: rclone config reconnect " + name + ":")
 	}
 
-	cfg := config.NewDefaultToken(opt.Token)
+	oauthToken, err := oauthutil.GetToken(name, m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token - please run: rclone config reconnect %s: - %w", name, err)
+	}
+
+	oauthConfig := &oauthutil.Config{
+		TokenURL: "https://gateway.internxt.com/drive/users/refresh",
+	}
+
+	oAuthClient, ts, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create oauth client: %w", err)
+	}
+
+	cfg := config.NewDefaultToken(oauthToken.AccessToken)
 	cfg.Mnemonic = opt.Mnemonic
+	cfg.HTTPClient = oAuthClient
 
 	userInfo, err := getUserInfo(ctx, &userInfoConfig{Token: cfg.Token})
 	if err != nil {
@@ -216,6 +242,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
 	}).Fill(ctx, f)
+
+	if ts != nil {
+		f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
+			return refreshJWTToken(ctx, name, m)
+		})
+		f.tokenRenewer.Start()
+	}
 
 	f.dirCache = dircache.New(f.root, cfg.RootFolderID, f)
 
@@ -520,6 +553,13 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	usage.Free = fs.NewUsageValue(*usage.Total - *usage.Used)
 
 	return usage, nil
+}
+
+func (f *Fs) Shutdown(ctx context.Context) error {
+	if f.tokenRenewer != nil {
+		f.tokenRenewer.Shutdown()
+	}
+	return nil
 }
 
 // Open opens a file for streaming
