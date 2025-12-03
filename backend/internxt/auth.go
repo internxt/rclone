@@ -3,7 +3,9 @@ package internxt
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -105,14 +107,8 @@ func (s *authServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send success HTML response
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-	<p>placeholder</p>
-</html>`)
+	// Redirect to success page
+	http.Redirect(w, r, driveWebURL+"/auth-link-ok", http.StatusFound)
 
 	s.result <- authResult{
 		mnemonic: string(mnemonicBytes),
@@ -172,10 +168,11 @@ func doAuth(ctx context.Context) (token, mnemonic string, err error) {
 	}
 }
 
-
 type userInfo struct {
 	RootFolderID string
 	Bucket       string
+	BridgeUser   string
+	UserID       string
 }
 
 type userInfoConfig struct {
@@ -229,8 +226,30 @@ func getUserInfo(ctx context.Context, cfg *userInfoConfig) (*userInfo, error) {
 	}
 
 	info.Bucket = resp.User.Bucket
+	info.BridgeUser = resp.User.BridgeUser
+	info.UserID = resp.User.UserID
 
-	fs.Debugf(nil, "User info: rootFolderId=%s, bucket=%s", info.RootFolderID, info.Bucket)
+	// Use RootFolderID from refresh response
+	if resp.User.RootFolderID != "" {
+		info.RootFolderID = resp.User.RootFolderID
+		fs.Debugf(nil, "Using RootFolderID from refresh response: %s", info.RootFolderID)
+	} else if resp.User.UUID != "" {
+		info.RootFolderID = resp.User.UUID
+		fs.Debugf(nil, "Using UUID from refresh response as RootFolderID: %s", info.RootFolderID)
+	}
+
+	if info.RootFolderID == "" {
+		return nil, errors.New("could not determine root folder ID from API response")
+	}
+
+	fs.Debugf(nil, "User info: rootFolderId=%s, bucket=%s, bridgeUser=%s, userID=%s",
+		info.RootFolderID, info.Bucket, info.BridgeUser, info.UserID)
+
+	if info.BridgeUser == "" || info.UserID == "" {
+		fs.Errorf(nil, "WARNING: BridgeUser or UserID is empty! BridgeUser=%q, UserID=%q",
+			info.BridgeUser, info.UserID)
+	}
+
 	return info, nil
 }
 
@@ -269,6 +288,15 @@ func jwtToOAuth2Token(jwtString string) (*oauth2.Token, error) {
 	}, nil
 }
 
+// computeBasicAuthHeader creates the BasicAuthHeader for bucket operations
+// Following the pattern from SDK's auth/access.go:96-102
+func computeBasicAuthHeader(bridgeUser, userID string) string {
+	sum := sha256.Sum256([]byte(userID))
+	hexPass := hex.EncodeToString(sum[:])
+	creds := fmt.Sprintf("%s:%s", bridgeUser, hexPass)
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
+}
+
 // refreshJWTToken refreshes the token using Internxt's refresh endpoint
 func refreshJWTToken(ctx context.Context, name string, m configmap.Mapper) error {
 	currentToken, err := oauthutil.GetToken(name, m)
@@ -276,7 +304,10 @@ func refreshJWTToken(ctx context.Context, name string, m configmap.Mapper) error
 		return fmt.Errorf("failed to get current token: %w", err)
 	}
 
-	mnemonic, _ := m.Get("mnemonic")
+	mnemonic, ok := m.Get("mnemonic")
+	if !ok || mnemonic == "" {
+		return errors.New("mnemonic is missing from configuration")
+	}
 
 	cfg := internxtconfig.NewDefaultToken(currentToken.AccessToken)
 	resp, err := internxtauth.RefreshToken(ctx, cfg)
@@ -302,7 +333,6 @@ func refreshJWTToken(ctx context.Context, name string, m configmap.Mapper) error
 	if resp.User.Bucket != "" {
 		m.Set("bucket", resp.User.Bucket)
 	}
-	m.Set("mnemonic", mnemonic)
 
 	fs.Debugf(name, "Token refreshed successfully, new expiry: %v", token.Expiry)
 	return nil
