@@ -159,6 +159,8 @@ type Fs struct {
 	cfg          *config.Config
 	features     *fs.Features
 	tokenRenewer *oauthutil.Renew
+	bridgeUser   string
+	userID       string
 }
 
 // Object holds the data for a remote file object
@@ -215,14 +217,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		TokenURL: "https://gateway.internxt.com/drive/users/refresh",
 	}
 
-	oAuthClient, ts, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
+	_, ts, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oauth client: %w", err)
 	}
 
 	cfg := config.NewDefaultToken(oauthToken.AccessToken)
 	cfg.Mnemonic = opt.Mnemonic
-	cfg.HTTPClient = oAuthClient
 
 	userInfo, err := getUserInfo(ctx, &userInfoConfig{Token: cfg.Token})
 	if err != nil {
@@ -231,12 +232,15 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	cfg.RootFolderID = userInfo.RootFolderID
 	cfg.Bucket = userInfo.Bucket
+	cfg.BasicAuthHeader = computeBasicAuthHeader(userInfo.BridgeUser, userInfo.UserID)
 
 	f := &Fs{
-		name: name,
-		root: strings.Trim(root, "/"),
-		opt:  *opt,
-		cfg:  cfg,
+		name:       name,
+		root:       strings.Trim(root, "/"),
+		opt:        *opt,
+		cfg:        cfg,
+		bridgeUser: userInfo.BridgeUser,
+		userID:     userInfo.UserID,
 	}
 
 	f.features = (&fs.Features{
@@ -245,7 +249,19 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	if ts != nil {
 		f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
-			return refreshJWTToken(ctx, name, m)
+			err := refreshJWTToken(ctx, name, m)
+			if err != nil {
+				return err
+			}
+
+			newToken, err := oauthutil.GetToken(name, m)
+			if err != nil {
+				return fmt.Errorf("failed to get refreshed token: %w", err)
+			}
+			f.cfg.Token = newToken.AccessToken
+			f.cfg.BasicAuthHeader = computeBasicAuthHeader(f.bridgeUser, f.userID)
+
+			return nil
 		})
 		f.tokenRenewer.Start()
 	}
