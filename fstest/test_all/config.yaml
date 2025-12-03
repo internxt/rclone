@@ -675,8 +675,14 @@ backends:
    ignore:
      # These are caused by the archive backend returning the underlying objects
      # with the parent backend having a different precision.
-     - TestServerSideCopyOverSelf
-     - TestServerSideMoveOverSelf
+    - TestServerSideCopyOverSelf
+    - TestServerSideMoveOverSelf
+ - backend:  "drime"
+   remote:   "TestDrime:"
+   ignoretests:
+     # The TestBisyncRemoteLocal/check_access_filters tests fail due to duplicated objects
+     - cmd/bisync
+   fastlist: false
  - backend: "internxt"
    remote: "TestInternxt:"
    fastlist: false
