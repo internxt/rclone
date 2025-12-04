@@ -189,7 +189,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	}
 
 	// Check if directory is empty
-	childFolders, err := folders.ListAllFolders(f.cfg, id)
+	childFolders, err := folders.ListAllFolders(ctx, f.cfg, id)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 		return fs.ErrorDirectoryNotEmpty
 	}
 
-	childFiles, err := folders.ListAllFiles(f.cfg, id)
+	childFiles, err := folders.ListAllFiles(ctx, f.cfg, id)
 	if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	}
 
 	// Delete the directory
-	err = folders.DeleteFolder(f.cfg, id)
+	err = folders.DeleteFolder(ctx, f.cfg, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return fs.ErrorDirNotFound
@@ -222,7 +222,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 // FindLeaf looks for a sub‑folder named `leaf` under the Internxt folder `pathID`.
 // If found, it returns its UUID and true. If not found, returns "", false.
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	entries, err := folders.ListAllFolders(f.cfg, pathID)
+	entries, err := folders.ListAllFolders(ctx, f.cfg, pathID)
 	if err != nil {
 		return "", false, err
 	}
@@ -236,7 +236,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 
 // CreateDir creates a new directory
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error) {
-	resp, err := folders.CreateFolder(f.cfg, folders.CreateFolderRequest{
+	resp, err := folders.CreateFolder(ctx, f.cfg, folders.CreateFolderRequest{
 		PlainName:        f.opt.Encoding.FromStandardName(leaf),
 		ParentFolderUUID: pathID,
 		ModificationTime: time.Now().UTC().Format(time.RFC3339),
@@ -257,7 +257,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 	}
 	var out fs.DirEntries
 
-	foldersList, err := folders.ListAllFolders(f.cfg, dirID)
+	foldersList, err := folders.ListAllFolders(ctx, f.cfg, dirID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 		remote := filepath.Join(dir, f.opt.Encoding.ToStandardName(e.PlainName))
 		out = append(out, fs.NewDir(remote, e.ModificationTime))
 	}
-	filesList, err := folders.ListAllFiles(f.cfg, dirID)
+	filesList, err := folders.ListAllFiles(ctx, f.cfg, dirID)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (f *Fs) Remove(ctx context.Context, remote string) error {
 	if err != nil {
 		return err
 	}
-	if err := folders.DeleteFolder(f.cfg, dirID); err != nil {
+	if err := folders.DeleteFolder(ctx, f.cfg, dirID); err != nil {
 		return err
 	}
 	f.dirCache.FlushDir(remote)
@@ -338,7 +338,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		return nil, fs.ErrorObjectNotFound
 	}
 
-	files, err := folders.ListAllFiles(f.cfg, dirID)
+	files, err := folders.ListAllFiles(ctx, f.cfg, dirID)
 	if err != nil {
 		return nil, err
 	}
@@ -416,12 +416,12 @@ func (o *Object) SetModTime(ctx context.Context, t time.Time) error {
 
 // About gets quota information
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
-	internxtLimit, err := users.GetLimit(f.cfg)
+	internxtLimit, err := users.GetLimit(ctx, f.cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	internxtUsage, err := users.GetUsage(f.cfg)
+	internxtUsage, err := users.GetUsage(ctx, f.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +451,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 	if o.f.opt.SimulateEmptyFiles && o.size == 0 {
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
-	return buckets.DownloadFileStream(o.f.cfg, o.id, rangeValue)
+	return buckets.DownloadFileStream(ctx, o.f.cfg, o.id, rangeValue)
 }
 
 // Update updates an existing file
@@ -494,7 +494,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	if o.uuid != "" || existsInBackend {
-		if err := files.DeleteFile(o.f.cfg, o.uuid); err != nil {
+		if err := files.DeleteFile(ctx, o.f.cfg, o.uuid); err != nil {
 			return fs.ErrorNotAFile
 		}
 	}
@@ -505,7 +505,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	meta, err := buckets.UploadFileStreamAuto(
+	meta, err := buckets.UploadFileStreamAuto(ctx,
 		o.f.cfg,
 		dirID,
 		o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)),
@@ -530,7 +530,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 // Remove deletes a file
 func (o *Object) Remove(ctx context.Context) error {
-	err := files.DeleteFile(o.f.cfg, o.uuid)
+	err := files.DeleteFile(ctx, o.f.cfg, o.uuid)
 	time.Sleep(500 * time.Millisecond)
 	return err
 }
