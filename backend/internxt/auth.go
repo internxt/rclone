@@ -179,76 +179,37 @@ type userInfoConfig struct {
 	Token string
 }
 
-// getUserInfo fetches user metadata from the JWT token and refresh endpoint
+// getUserInfo fetches user metadata from the refresh endpoint
 func getUserInfo(ctx context.Context, cfg *userInfoConfig) (*userInfo, error) {
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, _, err := parser.ParseUnverified(cfg.Token, jwt.MapClaims{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, errors.New("invalid token claims")
-	}
-
-	info := &userInfo{}
-
-	if payload, ok := claims["payload"].(map[string]any); ok {
-		if uuid, ok := payload["uuid"].(string); ok {
-			info.RootFolderID = uuid
-		} else if rootFolderID, ok := payload["rootFolderId"].(string); ok {
-			info.RootFolderID = rootFolderID
-		}
-	}
-
-	if info.RootFolderID == "" {
-		if uuid, ok := claims["uuid"].(string); ok {
-			info.RootFolderID = uuid
-		} else if sub, ok := claims["sub"].(string); ok {
-			info.RootFolderID = sub
-		}
-	}
-
-	if info.RootFolderID == "" {
-		fs.Debugf(nil, "JWT token claims: %+v", claims)
-		return nil, errors.New("could not find rootFolderId/uuid in JWT token")
-	}
-
+	// Call the refresh endpoint to get all user metadata
 	refreshCfg := internxtconfig.NewDefaultToken(cfg.Token)
 	resp, err := internxtauth.RefreshToken(ctx, refreshCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get bucket: %w", err)
+		return nil, fmt.Errorf("failed to fetch user info: %w", err)
 	}
 
 	if resp.User.Bucket == "" {
-		return nil, errors.New("refresh response missing user.bucket")
+		return nil, errors.New("API response missing user.bucket")
+	}
+	if resp.User.RootFolderID == "" {
+		return nil, errors.New("API response missing user.rootFolderId")
+	}
+	if resp.User.BridgeUser == "" {
+		return nil, errors.New("API response missing user.bridgeUser")
+	}
+	if resp.User.UserID == "" {
+		return nil, errors.New("API response missing user.userId")
 	}
 
-	info.Bucket = resp.User.Bucket
-	info.BridgeUser = resp.User.BridgeUser
-	info.UserID = resp.User.UserID
-
-	// Use RootFolderID from refresh response
-	if resp.User.RootFolderID != "" {
-		info.RootFolderID = resp.User.RootFolderID
-		fs.Debugf(nil, "Using RootFolderID from refresh response: %s", info.RootFolderID)
-	} else if resp.User.UUID != "" {
-		info.RootFolderID = resp.User.UUID
-		fs.Debugf(nil, "Using UUID from refresh response as RootFolderID: %s", info.RootFolderID)
+	info := &userInfo{
+		RootFolderID: resp.User.RootFolderID,
+		Bucket:       resp.User.Bucket,
+		BridgeUser:   resp.User.BridgeUser,
+		UserID:       resp.User.UserID,
 	}
 
-	if info.RootFolderID == "" {
-		return nil, errors.New("could not determine root folder ID from API response")
-	}
-
-	fs.Debugf(nil, "User info: rootFolderId=%s, bucket=%s, bridgeUser=%s, userID=%s",
-		info.RootFolderID, info.Bucket, info.BridgeUser, info.UserID)
-
-	if info.BridgeUser == "" || info.UserID == "" {
-		fs.Errorf(nil, "WARNING: BridgeUser or UserID is empty! BridgeUser=%q, UserID=%q",
-			info.BridgeUser, info.UserID)
-	}
+	fs.Debugf(nil, "User info: rootFolderId=%s, bucket=%s",
+		info.RootFolderID, info.Bucket)
 
 	return info, nil
 }
