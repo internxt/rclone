@@ -18,6 +18,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/lib/oauthutil"
+	"github.com/tyler-smith/go-bip39"
 	"golang.org/x/oauth2"
 )
 
@@ -32,7 +33,6 @@ const (
 type authResult struct {
 	mnemonic string
 	token    string
-	bucket   string
 	err      error
 }
 
@@ -87,23 +87,33 @@ func (s *authServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	mnemonicB64 := query.Get("mnemonic")
 	tokenB64 := query.Get("newToken")
 
+	// Helper to redirect and report error
+	redirectWithError := func(err error) {
+		http.Redirect(w, r, driveWebURL+"/auth-link-error", http.StatusFound)
+		s.result <- authResult{err: err}
+	}
+
 	if mnemonicB64 == "" || tokenB64 == "" {
-		http.Error(w, "Missing mnemonic or token", http.StatusBadRequest)
-		s.result <- authResult{err: errors.New("missing mnemonic or token in callback")}
+		redirectWithError(errors.New("missing mnemonic or token in callback"))
 		return
 	}
 
 	mnemonicBytes, err := base64.StdEncoding.DecodeString(mnemonicB64)
 	if err != nil {
-		http.Error(w, "Invalid mnemonic encoding", http.StatusBadRequest)
-		s.result <- authResult{err: fmt.Errorf("failed to decode mnemonic: %w", err)}
+		redirectWithError(fmt.Errorf("failed to decode mnemonic: %w", err))
+		return
+	}
+
+	// Validate that the mnemonic is a valid BIP39 mnemonic
+	mnemonic := string(mnemonicBytes)
+	if !bip39.IsMnemonicValid(mnemonic) {
+		redirectWithError(errors.New("mnemonic is not a valid BIP39 mnemonic"))
 		return
 	}
 
 	tokenBytes, err := base64.StdEncoding.DecodeString(tokenB64)
 	if err != nil {
-		http.Error(w, "Invalid token encoding", http.StatusBadRequest)
-		s.result <- authResult{err: fmt.Errorf("failed to decode token: %w", err)}
+		redirectWithError(fmt.Errorf("failed to decode token: %w", err))
 		return
 	}
 
@@ -111,7 +121,7 @@ func (s *authServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, driveWebURL+"/auth-link-ok", http.StatusFound)
 
 	s.result <- authResult{
-		mnemonic: string(mnemonicBytes),
+		mnemonic: mnemonic,
 		token:    string(tokenBytes),
 	}
 }
