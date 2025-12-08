@@ -51,6 +51,12 @@ func init() {
 				Help:    "Simulates empty files by uploading a small placeholder file instead. Alters the filename when uploading to keep track of empty files, but this is not visible through rclone.",
 			},
 			{
+				Name:     "skipHashValidation",
+				Default:  true,
+				Advanced: true,
+				Help:     "Skip hash validation when downloading files.\n\nBy default, hash validation is disabled. Set this to false to enable validation.",
+			},
+			{
 				Name:     rclone_config.ConfigEncoding,
 				Help:     rclone_config.ConfigEncodingHelp,
 				Advanced: true,
@@ -148,6 +154,7 @@ type Options struct {
 	Mnemonic           string               `config:"mnemonic"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
 	SimulateEmptyFiles bool                 `config:"simulateEmptyFiles"`
+	SkipHashValidation bool                 `config:"skipHashValidation"`
 }
 
 // Fs represents an Internxt remote
@@ -224,6 +231,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	cfg := config.NewDefaultToken(oauthToken.AccessToken)
 	cfg.Mnemonic = opt.Mnemonic
+	cfg.SkipHashValidation = opt.SkipHashValidation
 
 	userInfo, err := getUserInfo(ctx, &userInfoConfig{Token: cfg.Token})
 	if err != nil {
