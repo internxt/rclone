@@ -83,6 +83,7 @@ See the following for detailed instructions for
 - [rsync.net](/sftp/#rsync-net)
 - [Seafile](/seafile/)
 - [SFTP](/sftp/)
+- [Shade](/shade/)
 - [Sia](/sia/)
 - [SMB](/smb/)
 - [Storj](/storj/)
