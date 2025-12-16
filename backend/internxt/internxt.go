@@ -21,6 +21,7 @@ import (
 	rclone_config "github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
+	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
@@ -116,8 +117,8 @@ func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.Co
 			return nil, fmt.Errorf("authentication failed: %w", err)
 		}
 
-		// Store mnemonic
-		m.Set("mnemonic", newMnemonic)
+		// Store mnemonic (obscured)
+		m.Set("mnemonic", obscure.MustObscure(newMnemonic))
 
 		// Store token in oauth2 format
 		oauthToken, err := jwtToOAuth2Token(newToken)
@@ -213,6 +214,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	if opt.Mnemonic == "" {
 		return nil, errors.New("mnemonic is required - please run: rclone config reconnect " + name + ":")
+	}
+
+	// Reveal the obscured mnemonic
+	var err error
+	opt.Mnemonic, err = obscure.Reveal(opt.Mnemonic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reveal mnemonic: %w", err)
 	}
 
 	oauthToken, err := oauthutil.GetToken(name, m)
