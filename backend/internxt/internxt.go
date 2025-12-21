@@ -28,6 +28,7 @@ import (
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/oauthutil"
 	"github.com/rclone/rclone/lib/pacer"
+	"github.com/rclone/rclone/lib/random"
 )
 
 const (
@@ -436,6 +437,61 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error)
 	return resp.UUID, nil
 }
 
+// preUploadCheck checks if a file exists in the given directory
+// Returns the file metadata if it exists, nil if not
+func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string) (*folders.File, error) {
+	// Parse name and extension from the leaf
+	baseName := f.opt.Encoding.FromStandardName(leaf)
+	name := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	ext := strings.TrimPrefix(filepath.Ext(baseName), ".")
+
+	checkResult, err := files.CheckFilesExistence(ctx, f.cfg, directoryID, []files.FileExistenceCheck{
+		{
+			PlainName:    name,
+			Type:         ext,
+			OriginalFile: struct{}{},
+		},
+	})
+
+	if err != nil {
+		// If existence check fails, assume file doesn't exist to allow upload to proceed
+		return nil, nil
+	}
+
+	if len(checkResult.Files) > 0 && checkResult.Files[0].Exists {
+		existingUUID := checkResult.Files[0].UUID
+		if existingUUID != "" {
+			fileMeta, err := files.GetFileMeta(ctx, f.cfg, existingUUID)
+			if err == nil && fileMeta != nil {
+				return convertFileMetaToFile(fileMeta), nil
+			}
+
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// convertFileMetaToFile converts files.FileMeta to folders.File
+func convertFileMetaToFile(meta *files.FileMeta) *folders.File {
+	// FileMeta and folders.File have compatible structures
+	return &folders.File{
+		ID:               meta.ID,
+		UUID:             meta.UUID,
+		FileID:           meta.FileID,
+		PlainName:        meta.PlainName,
+		Type:             meta.Type,
+		Size:             meta.Size,
+		Bucket:           meta.Bucket,
+		FolderUUID:       meta.FolderUUID,
+		EncryptVersion:   meta.EncryptVersion,
+		ModificationTime: meta.ModificationTime,
+	}
+}
+
 // List lists a directory
 func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 	dirID, err := f.dirCache.FindDir(ctx, dir, false)
@@ -474,19 +530,45 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 
 // Put uploads a file
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	o := &Object{
-		f:       f,
-		remote:  src.Remote(),
-		size:    src.Size(),
-		modTime: src.ModTime(ctx),
+	remote := src.Remote()
+	leaf, directoryID, err := f.dirCache.FindPath(ctx, remote, false)
+	if err != nil {
+		if err == fs.ErrorDirNotFound {
+			o := &Object{
+				f:       f,
+				remote:  remote,
+				size:    src.Size(),
+				modTime: src.ModTime(ctx),
+			}
+			return o, o.Update(ctx, in, src, options...)
+		}
+		return nil, err
 	}
 
-	err := o.Update(ctx, in, src, options...)
+	// Check if file already exists
+	existingFile, err := f.preUploadCheck(ctx, leaf, directoryID)
 	if err != nil {
 		return nil, err
 	}
 
-	return o, nil
+	// Create object - if file exists, populate it with existing metadata
+	o := &Object{
+		f:       f,
+		remote:  remote,
+		size:    src.Size(),
+		modTime: src.ModTime(ctx),
+	}
+
+	if existingFile != nil {
+		// File exists - populate object with existing metadata
+		size, _ := existingFile.Size.Int64()
+		o.id = existingFile.FileID
+		o.uuid = existingFile.UUID
+		o.size = size
+		o.modTime = existingFile.ModificationTime
+	}
+
+	return o, o.Update(ctx, in, src, options...)
 }
 
 // Remove removes an object
@@ -648,77 +730,122 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 	return buckets.DownloadFileStream(ctx, o.f.cfg, o.id, rangeValue)
 }
 
-// Update updates an existing file
+// Update updates an existing file or creates a new one
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
 	isEmptyFile := false
+	remote := o.remote
+
+	// Handle empty file simulation
 	if src.Size() == 0 {
 		if !o.f.opt.SimulateEmptyFiles {
 			return fs.ErrorCantUploadEmptyFiles
-		} else {
-			// If we're faking an empty file, write some nonsense into it and give it a special suffix
-			isEmptyFile = true
-			in = bytes.NewReader(EMPTY_FILE_BYTES)
-			src = &Object{
-				f:       o.f,
-				remote:  src.Remote() + EMPTY_FILE_EXT,
-				modTime: src.ModTime(ctx),
-				size:    int64(len(EMPTY_FILE_BYTES)),
-			}
-			o.remote = o.remote + EMPTY_FILE_EXT
 		}
-	} else {
-		if o.f.opt.SimulateEmptyFiles {
-			// Remove the suffix if we're updating an empty file with actual data
-			o.remote = strings.TrimSuffix(o.remote, EMPTY_FILE_EXT)
+		// Simulate empty file with placeholder data and special suffix
+		isEmptyFile = true
+		in = bytes.NewReader(EMPTY_FILE_BYTES)
+		src = &Object{
+			f:       o.f,
+			remote:  src.Remote() + EMPTY_FILE_EXT,
+			modTime: src.ModTime(ctx),
+			size:    int64(len(EMPTY_FILE_BYTES)),
 		}
+		remote = remote + EMPTY_FILE_EXT
+	} else if o.f.opt.SimulateEmptyFiles {
+		// Remove suffix if updating an empty file with actual data
+		remote = strings.TrimSuffix(remote, EMPTY_FILE_EXT)
 	}
 
-	// Check if object exists on the server
-	existsInBackend := true
-	if o.uuid == "" {
-		objectInBackend, err := o.f.NewObject(ctx, src.Remote())
-		if err != nil {
-			existsInBackend = false
-		} else {
-			// If the object already exists, use the object from the server
-			if objectInBackend, ok := objectInBackend.(*Object); ok {
-				o = objectInBackend
-			}
-		}
-	}
-
-	if o.uuid != "" || existsInBackend {
-		if err := files.DeleteFile(ctx, o.f.cfg, o.uuid); err != nil {
-			return fs.ErrorNotAFile
-		}
-	}
-
-	// Create folder if it doesn't exist
-	_, dirID, err := o.f.dirCache.FindPath(ctx, o.remote, true)
+	// Create directory if it doesn't exist
+	_, dirID, err := o.f.dirCache.FindPath(ctx, remote, true)
 	if err != nil {
 		return err
 	}
 
+	// === RENAME-BASED ROLLBACK PATTERN ===
+	// This ensures data safety: old file is preserved until new upload succeeds
+
+	var backupUUID string
+	var backupName, backupType string
+	oldUUID := o.uuid
+
+	// Step 1: If file exists, rename to backup (preserves old file during upload)
+	if oldUUID != "" {
+		// Generate unique backup name
+		baseName := filepath.Base(remote)
+		name := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+		ext := strings.TrimPrefix(filepath.Ext(baseName), ".")
+
+		backupSuffix := fmt.Sprintf(".rclone-backup-%s", random.String(8))
+		backupName = o.f.opt.Encoding.FromStandardName(name + backupSuffix)
+		backupType = ext
+
+		// Rename existing file to backup name
+		err = files.RenameFile(ctx, o.f.cfg, oldUUID, backupName, backupType)
+		if err != nil {
+			return fmt.Errorf("failed to rename existing file to backup: %w", err)
+		}
+		backupUUID = oldUUID
+
+		fs.Debugf(o.f, "Renamed existing file %s to backup %s.%s (UUID: %s)", remote, backupName, backupType, backupUUID)
+	}
+
+	// Step 2: Upload new file to original location
 	meta, err := buckets.UploadFileStreamAuto(ctx,
 		o.f.cfg,
 		dirID,
-		o.f.opt.Encoding.FromStandardName(filepath.Base(o.remote)),
+		o.f.opt.Encoding.FromStandardName(filepath.Base(remote)),
 		in,
 		src.Size(),
 		src.ModTime(ctx),
 	)
 
 	if err != nil {
-		return err
+		// Upload failed - restore backup if it exists
+		if backupUUID != "" {
+			// Extract original name from remote
+			origBaseName := filepath.Base(remote)
+			origName := strings.TrimSuffix(origBaseName, filepath.Ext(origBaseName))
+			origType := strings.TrimPrefix(filepath.Ext(origBaseName), ".")
+
+			fs.Debugf(o.f, "Upload failed, attempting to restore backup %s.%s to %s", backupName, backupType, remote)
+
+			restoreErr := files.RenameFile(ctx, o.f.cfg, backupUUID,
+				o.f.opt.Encoding.FromStandardName(origName), origType)
+			if restoreErr != nil {
+				fs.Errorf(o.f, "CRITICAL: Upload failed AND backup restore failed: %v. Backup file remains as %s.%s (UUID: %s)",
+					restoreErr, backupName, backupType, backupUUID)
+				return fmt.Errorf("upload failed: %w (backup restore also failed: %v)", err, restoreErr)
+			}
+			fs.Debugf(o.f, "Upload failed, successfully restored backup file to original name")
+		}
+		return fmt.Errorf("upload failed: %w", err)
 	}
 
-	// Update the object with the new info
+	// Step 3: Upload succeeded - delete backup file
+	if backupUUID != "" {
+		fs.Debugf(o.f, "Upload succeeded, deleting backup %s.%s (UUID: %s)", backupName, backupType, backupUUID)
+
+		if err := files.DeleteFile(ctx, o.f.cfg, backupUUID); err != nil {
+			// Log warning but don't fail - new file is uploaded successfully
+			// Backup file becomes orphaned but data integrity is maintained
+			if !strings.Contains(err.Error(), "404") {
+				fs.Logf(o.f, "Warning: uploaded new version but failed to delete backup %s.%s (UUID: %s): %v. You may need to manually delete this orphaned file.",
+					backupName, backupType, backupUUID, err)
+			}
+		} else {
+			fs.Debugf(o.f, "Successfully deleted backup file after upload")
+		}
+	}
+
+	// Update object metadata
 	o.uuid = meta.UUID
 	o.size = src.Size()
-	// If this is a simulated empty file set fake size to 0
+	o.remote = remote
+	// If this is a simulated empty file, set size to 0 for user-facing operations
 	if isEmptyFile {
 		o.size = 0
 	}
+
 	return nil
 }
 
