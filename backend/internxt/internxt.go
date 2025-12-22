@@ -22,11 +22,27 @@ import (
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/obscure"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/oauthutil"
+	"github.com/rclone/rclone/lib/pacer"
 )
+
+const (
+	minSleep      = 10 * time.Millisecond
+	maxSleep      = 2 * time.Second
+	decayConstant = 2 // bigger for slower decay, exponential
+)
+
+// shouldRetry determines if an error should be retried
+func shouldRetry(ctx context.Context, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
+	return fserrors.ShouldRetry(err), err
+}
 
 // Register with Fs
 func init() {
@@ -166,6 +182,7 @@ type Fs struct {
 	dirCache     *dircache.DirCache
 	cfg          *config.Config
 	features     *fs.Features
+	pacer        *fs.Pacer
 	tokenRenewer *oauthutil.Renew
 	bridgeUser   string
 	userID       string
@@ -259,6 +276,8 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		userID:     userInfo.UserID,
 	}
 
+	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
+
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
 	}).Fill(ctx, f)
@@ -321,7 +340,6 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	}
 
 	f.dirCache.Put(dir, id)
-	time.Sleep(500 * time.Millisecond)
 
 	return nil
 }
@@ -340,7 +358,12 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	}
 
 	// Check if directory is empty
-	childFolders, err := folders.ListAllFolders(ctx, f.cfg, id)
+	var childFolders []folders.Folder
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		childFolders, err = folders.ListAllFolders(ctx, f.cfg, id)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return err
 	}
@@ -348,7 +371,12 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 		return fs.ErrorDirectoryNotEmpty
 	}
 
-	childFiles, err := folders.ListAllFiles(ctx, f.cfg, id)
+	var childFiles []folders.File
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		childFiles, err = folders.ListAllFiles(ctx, f.cfg, id)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return err
 	}
@@ -357,16 +385,18 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	}
 
 	// Delete the directory
-	err = folders.DeleteFolder(ctx, f.cfg, id)
-	if err != nil {
-		if strings.Contains(err.Error(), "404") {
-			return fs.ErrorDirNotFound
+	err = f.pacer.Call(func() (bool, error) {
+		err := folders.DeleteFolder(ctx, f.cfg, id)
+		if err != nil && strings.Contains(err.Error(), "404") {
+			return false, fs.ErrorDirNotFound
 		}
+		return shouldRetry(ctx, err)
+	})
+	if err != nil {
 		return err
 	}
 
 	f.dirCache.FlushDir(dir)
-	time.Sleep(500 * time.Millisecond)
 	return nil
 }
 
@@ -387,16 +417,22 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, e
 
 // CreateDir creates a new directory
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error) {
-	resp, err := folders.CreateFolder(ctx, f.cfg, folders.CreateFolderRequest{
+	request := folders.CreateFolderRequest{
 		PlainName:        f.opt.Encoding.FromStandardName(leaf),
 		ParentFolderUUID: pathID,
 		ModificationTime: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	var resp *folders.Folder
+	err := f.pacer.Call(func() (bool, error) {
+		var err error
+		resp, err = folders.CreateFolder(ctx, f.cfg, request)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return "", fmt.Errorf("can't create folder, %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
 	return resp.UUID, nil
 }
 
@@ -688,7 +724,8 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 // Remove deletes a file
 func (o *Object) Remove(ctx context.Context) error {
-	err := files.DeleteFile(ctx, o.f.cfg, o.uuid)
-	time.Sleep(500 * time.Millisecond)
-	return err
+	return o.f.pacer.Call(func() (bool, error) {
+		err := files.DeleteFile(ctx, o.f.cfg, o.uuid)
+		return shouldRetry(ctx, err)
+	})
 }
