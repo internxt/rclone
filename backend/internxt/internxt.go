@@ -735,6 +735,10 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	isEmptyFile := false
 	remote := o.remote
 
+	origBaseName := filepath.Base(remote)
+	origName := strings.TrimSuffix(origBaseName, filepath.Ext(origBaseName))
+	origType := strings.TrimPrefix(filepath.Ext(origBaseName), ".")
+
 	// Handle empty file simulation
 	if src.Size() == 0 {
 		if !o.f.opt.SimulateEmptyFiles {
@@ -761,8 +765,8 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	// === RENAME-BASED ROLLBACK PATTERN ===
-	// This ensures data safety: old file is preserved until new upload succeeds
+	// rename based rollback pattern
+	// old file is preserved until new upload succeeds
 
 	var backupUUID string
 	var backupName, backupType string
@@ -802,11 +806,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if err != nil {
 		// Upload failed - restore backup if it exists
 		if backupUUID != "" {
-			// Extract original name from remote
-			origBaseName := filepath.Base(remote)
-			origName := strings.TrimSuffix(origBaseName, filepath.Ext(origBaseName))
-			origType := strings.TrimPrefix(filepath.Ext(origBaseName), ".")
-
 			fs.Debugf(o.f, "Upload failed, attempting to restore backup %s.%s to %s", backupName, backupType, remote)
 
 			restoreErr := files.RenameFile(ctx, o.f.cfg, backupUUID,
@@ -826,8 +825,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		fs.Debugf(o.f, "Upload succeeded, deleting backup %s.%s (UUID: %s)", backupName, backupType, backupUUID)
 
 		if err := files.DeleteFile(ctx, o.f.cfg, backupUUID); err != nil {
-			// Log warning but don't fail - new file is uploaded successfully
-			// Backup file becomes orphaned but data integrity is maintained
 			if !strings.Contains(err.Error(), "404") {
 				fs.Logf(o.f, "Warning: uploaded new version but failed to delete backup %s.%s (UUID: %s): %v. You may need to manually delete this orphaned file.",
 					backupName, backupType, backupUUID, err)
@@ -841,7 +838,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	o.uuid = meta.UUID
 	o.size = src.Size()
 	o.remote = remote
-	// If this is a simulated empty file, set size to 0 for user-facing operations
 	if isEmptyFile {
 		o.size = 0
 	}
