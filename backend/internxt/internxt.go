@@ -53,16 +53,6 @@ func init() {
 		Config:      Config,
 		Options: []fs.Option{
 			{
-				Name:       "token",
-				Help:       "Internxt auth token (JWT).\n\nLeave blank to trigger interactive login.",
-				IsPassword: true,
-			},
-			{
-				Name:       "mnemonic",
-				Help:       "Internxt encryption mnemonic.\n\nLeave blank to trigger interactive login.",
-				IsPassword: true,
-			},
-			{
 				Name:    "simulateEmptyFiles",
 				Default: false,
 				Help:    "Simulates empty files by uploading a small placeholder file instead. Alters the filename when uploading to keep track of empty files, but this is not visible through rclone.",
@@ -100,7 +90,7 @@ func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.Co
 			oauthToken, err := oauthutil.GetToken(name, m)
 			if err != nil {
 				fs.Errorf(nil, "Failed to get token: %v", err)
-				return fs.ConfigGoto("reauth")
+				return fs.ConfigGoto("auth")
 			}
 
 			if time.Until(oauthToken.Expiry) < tokenExpiry2d {
@@ -108,23 +98,17 @@ func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.Co
 				err := refreshJWTToken(ctx, name, m)
 				if err != nil {
 					fs.Errorf(nil, "Failed to refresh token: %v", err)
-					return fs.ConfigConfirm("reauth", true, "config_reauth",
-						"Token refresh failed. Re-authenticate?")
+					return fs.ConfigGoto("auth")
 				}
 				fs.Logf(nil, "Token refreshed successfully")
 				return nil, nil
 			}
 
-			return fs.ConfigConfirm("reauth", false, "config_reauth",
-				"Already authenticated. Re-authenticate?")
-		}
-
-		return fs.ConfigGoto("auth")
-
-	case "reauth":
-		if configIn.Result == "false" {
+			// Token is valid - complete config without re-auth prompt
+			fs.Logf(nil, "Existing credentials are valid")
 			return nil, nil
 		}
+
 		return fs.ConfigGoto("auth")
 
 	case "auth":
