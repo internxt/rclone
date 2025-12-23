@@ -388,7 +388,12 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 // FindLeaf looks for a sub‑folder named `leaf` under the Internxt folder `pathID`.
 // If found, it returns its UUID and true. If not found, returns "", false.
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (string, bool, error) {
-	entries, err := folders.ListAllFolders(ctx, f.cfg, pathID)
+	var entries []folders.Folder
+	err := f.pacer.Call(func() (bool, error) {
+		var err error
+		entries, err = folders.ListAllFolders(ctx, f.cfg, pathID)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return "", false, err
 	}
@@ -484,7 +489,12 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 	}
 	var out fs.DirEntries
 
-	foldersList, err := folders.ListAllFolders(ctx, f.cfg, dirID)
+	var foldersList []folders.Folder
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		foldersList, err = folders.ListAllFolders(ctx, f.cfg, dirID)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +502,12 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 		remote := filepath.Join(dir, f.opt.Encoding.ToStandardName(e.PlainName))
 		out = append(out, fs.NewDir(remote, e.ModificationTime))
 	}
-	filesList, err := folders.ListAllFiles(ctx, f.cfg, dirID)
+	var filesList []folders.File
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		filesList, err = folders.ListAllFiles(ctx, f.cfg, dirID)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +586,11 @@ func (f *Fs) Remove(ctx context.Context, remote string) error {
 	if err != nil {
 		return err
 	}
-	if err := folders.DeleteFolder(ctx, f.cfg, dirID); err != nil {
+	err = f.pacer.Call(func() (bool, error) {
+		err := folders.DeleteFolder(ctx, f.cfg, dirID)
+		return shouldRetry(ctx, err)
+	})
+	if err != nil {
 		return err
 	}
 	f.dirCache.FlushDir(remote)
@@ -591,7 +610,12 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		return nil, fs.ErrorObjectNotFound
 	}
 
-	files, err := folders.ListAllFiles(ctx, f.cfg, dirID)
+	var files []folders.File
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		files, err = folders.ListAllFiles(ctx, f.cfg, dirID)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -669,12 +693,22 @@ func (o *Object) SetModTime(ctx context.Context, t time.Time) error {
 
 // About gets quota information
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
-	internxtLimit, err := users.GetLimit(ctx, f.cfg)
+	var internxtLimit *users.LimitResponse
+	err := f.pacer.Call(func() (bool, error) {
+		var err error
+		internxtLimit, err = users.GetLimit(ctx, f.cfg)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	internxtUsage, err := users.GetUsage(ctx, f.cfg)
+	var internxtUsage *users.UsageResponse
+	err = f.pacer.Call(func() (bool, error) {
+		var err error
+		internxtUsage, err = users.GetUsage(ctx, f.cfg)
+		return shouldRetry(ctx, err)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -711,7 +745,16 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 	if o.f.opt.SimulateEmptyFiles && o.size == 0 {
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
-	return buckets.DownloadFileStream(ctx, o.f.cfg, o.id, rangeValue)
+	var stream io.ReadCloser
+	err := o.f.pacer.Call(func() (bool, error) {
+		var err error
+		stream, err = buckets.DownloadFileStream(ctx, o.f.cfg, o.id, rangeValue)
+		return shouldRetry(ctx, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stream, nil
 }
 
 // Update updates an existing file or creates a new one
@@ -768,7 +811,10 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		backupType = ext
 
 		// Rename existing file to backup name
-		err = files.RenameFile(ctx, o.f.cfg, oldUUID, backupName, backupType)
+		err = o.f.pacer.Call(func() (bool, error) {
+			err := files.RenameFile(ctx, o.f.cfg, oldUUID, backupName, backupType)
+			return shouldRetry(ctx, err)
+		})
 		if err != nil {
 			return fmt.Errorf("failed to rename existing file to backup: %w", err)
 		}
@@ -777,44 +823,36 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		fs.Debugf(o.f, "Renamed existing file %s to backup %s.%s (UUID: %s)", remote, backupName, backupType, backupUUID)
 	}
 
-	// Step 2: Upload new file to original location
-	meta, err := buckets.UploadFileStreamAuto(ctx,
-		o.f.cfg,
-		dirID,
-		o.f.opt.Encoding.FromStandardName(filepath.Base(remote)),
-		in,
-		src.Size(),
-		src.ModTime(ctx),
-	)
+	var meta *buckets.CreateMetaResponse
+	err = o.f.pacer.Call(func() (bool, error) {
+		var err error
+		meta, err = buckets.UploadFileStreamAuto(ctx,
+			o.f.cfg,
+			dirID,
+			o.f.opt.Encoding.FromStandardName(filepath.Base(remote)),
+			in,
+			src.Size(),
+			src.ModTime(ctx),
+		)
+		return shouldRetry(ctx, err)
+	})
 
 	if err != nil {
 		// Upload failed - restore backup if it exists
 		if backupUUID != "" {
 			fs.Debugf(o.f, "Upload failed, attempting to restore backup %s.%s to %s", backupName, backupType, remote)
 
-			restoreErr := files.RenameFile(ctx, o.f.cfg, backupUUID,
-				o.f.opt.Encoding.FromStandardName(origName), origType)
+			restoreErr := o.f.pacer.Call(func() (bool, error) {
+				err := files.RenameFile(ctx, o.f.cfg, backupUUID,
+					o.f.opt.Encoding.FromStandardName(origName), origType)
+				return shouldRetry(ctx, err)
+			})
 			if restoreErr != nil {
 				fs.Errorf(o.f, "CRITICAL: Upload failed AND backup restore failed: %v. Backup file remains as %s.%s (UUID: %s)",
 					restoreErr, backupName, backupType, backupUUID)
 				return fmt.Errorf("upload failed: %w (backup restore also failed: %v)", err, restoreErr)
 			}
 			fs.Debugf(o.f, "Upload failed, successfully restored backup file to original name")
-		}
-		return fmt.Errorf("upload failed: %w", err)
-	}
-
-	// Step 3: Upload succeeded - delete backup file
-	if backupUUID != "" {
-		fs.Debugf(o.f, "Upload succeeded, deleting backup %s.%s (UUID: %s)", backupName, backupType, backupUUID)
-
-		if err := files.DeleteFile(ctx, o.f.cfg, backupUUID); err != nil {
-			if !strings.Contains(err.Error(), "404") {
-				fs.Logf(o.f, "Warning: uploaded new version but failed to delete backup %s.%s (UUID: %s): %v. You may need to manually delete this orphaned file.",
-					backupName, backupType, backupUUID, err)
-			}
-		} else {
-			fs.Debugf(o.f, "Successfully deleted backup file after upload")
 		}
 	}
 
