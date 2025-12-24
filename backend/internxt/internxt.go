@@ -447,7 +447,7 @@ func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string) (*fol
 		return nil, nil
 	}
 
-	if len(checkResult.Files) > 0 && checkResult.Files[0].Exists {
+	if len(checkResult.Files) > 0 && checkResult.Files[0].FileExists() {
 		existingUUID := checkResult.Files[0].UUID
 		if existingUUID != "" {
 			fileMeta, err := files.GetFileMeta(ctx, f.cfg, existingUUID)
@@ -460,7 +460,6 @@ func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string) (*fol
 			}
 		}
 	}
-
 	return nil, nil
 }
 
@@ -854,6 +853,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 			}
 			fs.Debugf(o.f, "Upload failed, successfully restored backup file to original name")
 		}
+		return err
 	}
 
 	// Update object metadata
@@ -862,6 +862,22 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	o.remote = remote
 	if isEmptyFile {
 		o.size = 0
+	}
+
+	// Step 3: Upload succeeded - delete the backup file
+	if backupUUID != "" {
+		fs.Debugf(o.f, "Upload succeeded, deleting backup file %s.%s (UUID: %s)", backupName, backupType, backupUUID)
+		err := o.f.pacer.Call(func() (bool, error) {
+			err := files.DeleteFile(ctx, o.f.cfg, backupUUID)
+			return shouldRetry(ctx, err)
+		})
+		if err != nil {
+			fs.Errorf(o.f, "Failed to delete backup file %s.%s (UUID: %s): %v. This may leave an orphaned backup file.",
+				backupName, backupType, backupUUID, err)
+			// Don't fail the upload just because backup deletion failed
+		} else {
+			fs.Debugf(o.f, "Successfully deleted backup file")
+		}
 	}
 
 	return nil
