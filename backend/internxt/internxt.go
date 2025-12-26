@@ -72,7 +72,8 @@ func init() {
 					encoder.EncodeSlash |
 					encoder.EncodeBackSlash |
 					encoder.EncodeRightPeriod |
-					encoder.EncodeDot,
+					encoder.EncodeDot |
+					encoder.EncodeCrLf,
 			},
 		}},
 	)
@@ -414,12 +415,20 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (string, error)
 	}
 
 	var resp *folders.Folder
-	err := f.pacer.Call(func() (bool, error) {
+	err := f.pacer.CallNoRetry(func() (bool, error) {
 		var err error
 		resp, err = folders.CreateFolder(ctx, f.cfg, request)
 		return shouldRetry(ctx, err)
 	})
 	if err != nil {
+		// If folder already exists (409 conflict), try to find it
+		if strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "Conflict") {
+			existingID, found, findErr := f.FindLeaf(ctx, pathID, leaf)
+			if findErr == nil && found {
+				fs.Debugf(f, "Folder %q already exists in %q, using existing UUID: %s", leaf, pathID, existingID)
+				return existingID, nil
+			}
+		}
 		return "", fmt.Errorf("can't create folder, %w", err)
 	}
 
@@ -823,7 +832,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	var meta *buckets.CreateMetaResponse
-	err = o.f.pacer.Call(func() (bool, error) {
+	err = o.f.pacer.CallNoRetry(func() (bool, error) {
 		var err error
 		meta, err = buckets.UploadFileStreamAuto(ctx,
 			o.f.cfg,
