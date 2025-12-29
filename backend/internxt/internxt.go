@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"path"
 	"path/filepath"
 	"strings"
@@ -858,27 +859,17 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	})
 
 	if err != nil {
-		// Upload failed - restore backup if it exists
-		if backupUUID != "" {
-			fs.Debugf(o.f, "Upload failed, attempting to restore backup %s.%s to %s", backupName, backupType, remote)
+		meta, err = o.recoverFromTimeoutConflict(ctx, err, remote, dirID)
+	}
 
-			restoreErr := o.f.pacer.Call(func() (bool, error) {
-				err := files.RenameFile(ctx, o.f.cfg, backupUUID,
-					o.f.opt.Encoding.FromStandardName(origName), origType)
-				return shouldRetry(ctx, err)
-			})
-			if restoreErr != nil {
-				fs.Errorf(o.f, "CRITICAL: Upload failed AND backup restore failed: %v. Backup file remains as %s.%s (UUID: %s)",
-					restoreErr, backupName, backupType, backupUUID)
-				return fmt.Errorf("upload failed: %w (backup restore also failed: %v)", err, restoreErr)
-			}
-			fs.Debugf(o.f, "Upload failed, successfully restored backup file to original name")
-		}
+	if err != nil {
+		o.restoreBackupFile(ctx, backupUUID, origName, origType)
 		return err
 	}
 
 	// Update object metadata
 	o.uuid = meta.UUID
+	o.id = meta.FileID
 	o.size = src.Size()
 	o.remote = remote
 	if isEmptyFile {
@@ -902,6 +893,82 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	return nil
+}
+
+// isTimeoutError checks if an error is a timeout using proper error type checking
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return false
+}
+
+// isConflictError checks if an error indicates a file conflict (409)
+func isConflictError(err error) bool {
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "409") ||
+		strings.Contains(errMsg, "Conflict") ||
+		strings.Contains(errMsg, "already exists")
+}
+
+// recoverFromTimeoutConflict attempts to recover from a timeout or conflict error
+func (o *Object) recoverFromTimeoutConflict(ctx context.Context, uploadErr error, remote, dirID string) (*buckets.CreateMetaResponse, error) {
+	if !isTimeoutError(uploadErr) && !isConflictError(uploadErr) {
+		return nil, uploadErr
+	}
+
+	baseName := filepath.Base(remote)
+	encodedName := o.f.opt.Encoding.FromStandardName(baseName)
+
+	var meta *buckets.CreateMetaResponse
+	checkErr := o.f.pacer.Call(func() (bool, error) {
+		existingFile, err := o.f.preUploadCheck(ctx, encodedName, dirID)
+		if err != nil {
+			return shouldRetry(ctx, err)
+		}
+		if existingFile != nil {
+			name := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+			ext := strings.TrimPrefix(filepath.Ext(baseName), ".")
+
+			meta = &buckets.CreateMetaResponse{
+				UUID:      existingFile.UUID,
+				FileID:    existingFile.FileID,
+				Name:      name,
+				PlainName: name,
+				Type:      ext,
+				Size:      existingFile.Size,
+			}
+			o.id = existingFile.FileID
+		}
+		return false, nil
+	})
+
+	if checkErr != nil {
+		return nil, uploadErr
+	}
+
+	if meta != nil {
+		return meta, nil
+	}
+
+	return nil, uploadErr
+}
+
+// restoreBackupFile restores a backup file after upload failure
+func (o *Object) restoreBackupFile(ctx context.Context, backupUUID, origName, origType string) {
+	if backupUUID == "" {
+		return
+	}
+
+	o.f.pacer.Call(func() (bool, error) {
+		err := files.RenameFile(ctx, o.f.cfg, backupUUID,
+			o.f.opt.Encoding.FromStandardName(origName), origType)
+		return shouldRetry(ctx, err)
+	})
 }
 
 // Remove deletes a file
