@@ -42,6 +42,9 @@ func shouldRetry(ctx context.Context, err error) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
+	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "Unauthorized")) {
+		return true, err
+	}
 	return fserrors.ShouldRetry(err), err
 }
 
@@ -538,6 +541,11 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 // Put uploads a file
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	remote := src.Remote()
+
+	if src.Size() == 0 && !f.opt.SimulateEmptyFiles {
+		return nil, fs.ErrorCantUploadEmptyFiles
+	}
+
 	leaf, directoryID, err := f.dirCache.FindPath(ctx, remote, false)
 	if err != nil {
 		if err == fs.ErrorDirNotFound {
@@ -632,7 +640,11 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		if len(e.Type) > 0 {
 			name += "." + e.Type
 		}
-		if f.opt.Encoding.ToStandardName(name) == filepath.Base(remote) {
+		decodedName := f.opt.Encoding.ToStandardName(name)
+		targetName := filepath.Base(remote)
+		match := decodedName == targetName
+
+		if match {
 			return newObjectWithFile(f, remote, &e), nil
 		}
 		// If we are simulating empty files, check for a file with the special suffix and if found return it as if empty.
