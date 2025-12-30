@@ -118,12 +118,23 @@ func (s *authServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect to success page
+	cfg := internxtconfig.NewDefaultToken(string(tokenBytes))
+	resp, err := internxtauth.RefreshToken(r.Context(), cfg)
+	if err != nil {
+		redirectWithError(fmt.Errorf("failed to refresh token: %w", err))
+		return
+	}
+
+	if resp.NewToken == "" {
+		redirectWithError(errors.New("refresh response missing newToken"))
+		return
+	}
+
 	http.Redirect(w, r, driveWebURL+"/auth-link-ok", http.StatusFound)
 
 	s.result <- authResult{
 		mnemonic: mnemonic,
-		token:    string(tokenBytes),
+		token:    resp.NewToken,
 	}
 }
 
@@ -159,20 +170,11 @@ func doAuth(ctx context.Context) (token, mnemonic string, err error) {
 			return "", "", result.err
 		}
 
-		fs.Logf(nil, "SSO login successful, refreshing token to fetch user data...")
-
-		cfg := internxtconfig.NewDefaultToken(result.token)
-		resp, err := internxtauth.RefreshToken(ctx, cfg)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to refresh token: %w", err)
-		}
-
-		if resp.NewToken == "" {
-			return "", "", errors.New("refresh response missing newToken")
-		}
-
 		fs.Logf(nil, "Authentication successful!")
-		return resp.NewToken, result.mnemonic, nil
+		return result.token, result.mnemonic, nil
+
+	case <-ctx.Done():
+		return "", "", fmt.Errorf("authentication cancelled: %w", ctx.Err())
 
 	case <-time.After(5 * time.Minute):
 		return "", "", errors.New("authentication timeout after 5 minutes")
