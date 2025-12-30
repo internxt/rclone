@@ -15,6 +15,7 @@ import (
 
 	"github.com/internxt/rclone-adapter/buckets"
 	config "github.com/internxt/rclone-adapter/config"
+	sdkerrors "github.com/internxt/rclone-adapter/errors"
 	"github.com/internxt/rclone-adapter/files"
 	"github.com/internxt/rclone-adapter/folders"
 	"github.com/internxt/rclone-adapter/users"
@@ -43,9 +44,11 @@ func shouldRetry(ctx context.Context, err error) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
-	if err != nil && (strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "Unauthorized")) {
+	var httpErr *sdkerrors.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode() == 401 {
 		return true, err
 	}
+
 	return fserrors.ShouldRetry(err), err
 }
 
