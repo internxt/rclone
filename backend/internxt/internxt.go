@@ -61,11 +61,6 @@ func init() {
 		Config:      Config,
 		Options: []fs.Option{
 			{
-				Name:    "simulateEmptyFiles",
-				Default: false,
-				Help:    "Simulates empty files by uploading a small placeholder file instead. Alters the filename when uploading to keep track of empty files, but this is not visible through rclone.",
-			},
-			{
 				Name:     "skipHashValidation",
 				Default:  true,
 				Advanced: true,
@@ -150,20 +145,11 @@ func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.Co
 	return nil, fmt.Errorf("unknown state %q", configIn.State)
 }
 
-const (
-	EMPTY_FILE_EXT = ".__RCLONE_EMPTY__"
-)
-
-var (
-	EMPTY_FILE_BYTES = []byte{0x13, 0x09, 0x20, 0x23}
-)
-
 // Options holds configuration options for this interface
 type Options struct {
 	Token              string               `config:"token"`
 	Mnemonic           string               `config:"mnemonic"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
-	SimulateEmptyFiles bool                 `config:"simulateEmptyFiles"`
 	SkipHashValidation bool                 `config:"skipHashValidation"`
 }
 
@@ -532,11 +518,6 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 			remote += "." + e.Type
 		}
 		remote = filepath.Join(dir, f.opt.Encoding.ToStandardName(remote))
-		// If we found a file with the special empty file suffix, pretend that it's empty
-		if f.opt.SimulateEmptyFiles && strings.HasSuffix(remote, EMPTY_FILE_EXT) {
-			remote = strings.TrimSuffix(remote, EMPTY_FILE_EXT)
-			e.Size = "0"
-		}
 		out = append(out, newObjectWithFile(f, remote, &e))
 	}
 	return out, nil
@@ -546,7 +527,7 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	remote := src.Remote()
 
-	if src.Size() == 0 && !f.opt.SimulateEmptyFiles {
+	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
 
@@ -650,13 +631,6 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 		if match {
 			return newObjectWithFile(f, remote, &e), nil
-		}
-		// If we are simulating empty files, check for a file with the special suffix and if found return it as if empty.
-		if f.opt.SimulateEmptyFiles {
-			if f.opt.Encoding.ToStandardName(name) == filepath.Base(remote+EMPTY_FILE_EXT) {
-				e.Size = "0"
-				return newObjectWithFile(f, remote, &e), nil
-			}
 		}
 	}
 	return nil, fs.ErrorObjectNotFound
@@ -765,10 +739,10 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 		}
 	}
 
-	// Return nothing if we're faking an empty file
-	if o.f.opt.SimulateEmptyFiles && o.size == 0 {
+	if o.size == 0 {
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
+
 	var stream io.ReadCloser
 	err := o.f.pacer.Call(func() (bool, error) {
 		var err error
@@ -783,32 +757,15 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 
 // Update updates an existing file or creates a new one
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	isEmptyFile := false
+	if src.Size() == 0 {
+		return fs.ErrorCantUploadEmptyFiles
+	}
+
 	remote := o.remote
 
 	origBaseName := filepath.Base(remote)
 	origName := strings.TrimSuffix(origBaseName, filepath.Ext(origBaseName))
 	origType := strings.TrimPrefix(filepath.Ext(origBaseName), ".")
-
-	// Handle empty file simulation
-	if src.Size() == 0 {
-		if !o.f.opt.SimulateEmptyFiles {
-			return fs.ErrorCantUploadEmptyFiles
-		}
-		// Simulate empty file with placeholder data and special suffix
-		isEmptyFile = true
-		in = bytes.NewReader(EMPTY_FILE_BYTES)
-		src = &Object{
-			f:       o.f,
-			remote:  src.Remote() + EMPTY_FILE_EXT,
-			modTime: src.ModTime(ctx),
-			size:    int64(len(EMPTY_FILE_BYTES)),
-		}
-		remote = remote + EMPTY_FILE_EXT
-	} else if o.f.opt.SimulateEmptyFiles {
-		// Remove suffix if updating an empty file with actual data
-		remote = strings.TrimSuffix(remote, EMPTY_FILE_EXT)
-	}
 
 	// Create directory if it doesn't exist
 	_, dirID, err := o.f.dirCache.FindPath(ctx, remote, true)
@@ -875,9 +832,6 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	o.id = meta.FileID
 	o.size = src.Size()
 	o.remote = remote
-	if isEmptyFile {
-		o.size = 0
-	}
 
 	// Step 3: Upload succeeded - delete the backup file
 	if backupUUID != "" {
