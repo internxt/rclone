@@ -47,7 +47,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/henrybear327/Proton-API-Bridge v1.0.0
 	github.com/henrybear327/go-proton-api v1.0.0
-	github.com/internxt/rclone-adapter v0.0.0-20260119171815-eddb2c0aa71e
+	github.com/internxt/rclone-adapter v0.0.0-20260120161514-a27b77ef4431
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/jlaffaye/ftp v0.2.1-0.20240918233326-1b970516f5d3
 	github.com/josephspurrier/goversioninfo v1.5.0
@@ -159,8 +159,8 @@ require (
 	github.com/cronokirby/saferith v0.33.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/disintegration/imaging v1.6.2 // indirect
-	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/dromara/dongle v1.0.1 // indirect
+	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect

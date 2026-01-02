@@ -527,10 +527,6 @@ func (f *Fs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	remote := src.Remote()
 
-	if src.Size() == 0 {
-		return nil, fs.ErrorCantUploadEmptyFiles
-	}
-
 	leaf, directoryID, err := f.dirCache.FindPath(ctx, remote, false)
 	if err != nil {
 		if err == fs.ErrorDirNotFound {
@@ -759,10 +755,6 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 
 // Update updates an existing file or creates a new one
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	if src.Size() == 0 {
-		return fs.ErrorCantUploadEmptyFiles
-	}
-
 	remote := o.remote
 
 	origBaseName := filepath.Base(remote)
