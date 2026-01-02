@@ -432,10 +432,8 @@ github.com/henrybear327/go-proton-api v1.0.0/go.mod h1:w63MZuzufKcIZ93pwRgiOtxMX
 github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6/go.mod h1:aSSvb/t6k1mPoxDqO4vJh6VOCGPwU4O0C2/Eqndh1Sc=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/internxt/rclone-adapter v0.0.0-20260119122458-ee05ff60abe3 h1:8qAhbS4dyWZsi4ps6Clg4myG97mC0eW0/5WKqBpXmgY=
-github.com/internxt/rclone-adapter v0.0.0-20260119122458-ee05ff60abe3/go.mod h1:jpF/MwuBg+opa4Q9izanNl8KzdtYhfBoZWyv70vqmgc=
-github.com/internxt/rclone-adapter v0.0.0-20260119171815-eddb2c0aa71e h1:8N6gQf9569NbT6FwGxKNnzUIEYXUB56tNnUDBZ4P39g=
-github.com/internxt/rclone-adapter v0.0.0-20260119171815-eddb2c0aa71e/go.mod h1:jpF/MwuBg+opa4Q9izanNl8KzdtYhfBoZWyv70vqmgc=
+github.com/internxt/rclone-adapter v0.0.0-20260120161514-a27b77ef4431 h1:ZiJoHpiFsodynTDqc7tZYhe+qG2eMAy1kMoQf818RFc=
+github.com/internxt/rclone-adapter v0.0.0-20260120161514-a27b77ef4431/go.mod h1:jpF/MwuBg+opa4Q9izanNl8KzdtYhfBoZWyv70vqmgc=
 github.com/jcmturner/aescts/v2 v2.0.0 h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=
 github.com/jcmturner/aescts/v2 v2.0.0/go.mod h1:AiaICIRyfYg35RUkr8yESTqvSy7csK90qZ5xfvvsoNs=
 github.com/jcmturner/dnsutils/v2 v2.0.0 h1:lltnkeZGL0wILNvrNiVCR6Ro5PGU/SeBvVO/8c/iPbo=
