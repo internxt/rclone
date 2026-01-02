@@ -45,7 +45,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/henrybear327/Proton-API-Bridge v1.0.0
 	github.com/henrybear327/go-proton-api v1.0.0
-	github.com/internxt/rclone-adapter v0.0.0-20251128125449-40f1a8e381e7
+	github.com/internxt/rclone-adapter v0.0.0-20260102144006-dbee67e2bad8
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/jlaffaye/ftp v0.2.1-0.20240918233326-1b970516f5d3
 	github.com/josephspurrier/goversioninfo v1.5.0
@@ -79,6 +79,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/t3rm1n4l/go-mega v0.0.0-20251031123324-a804aaa87491
+	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/unknwon/goconfig v1.0.0
 	github.com/willscott/go-nfs v0.0.3
 	github.com/winfsp/cgofuse v1.6.1-0.20250813110601-7d90b0992471
@@ -242,7 +243,6 @@ require (
 	github.com/tinylib/msgp v1.5.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
-	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/willscott/go-nfs-client v0.0.0-20251022144359-801f10d98886 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
