@@ -794,6 +794,13 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		// Rename existing file to backup name
 		err = o.f.pacer.Call(func() (bool, error) {
 			err := files.RenameFile(ctx, o.f.cfg, oldUUID, backupName, backupType)
+			if err != nil {
+				// Handle 409 Conflict: Treat as success.
+				var httpErr *sdkerrors.HTTPError
+				if errors.As(err, &httpErr) && httpErr.StatusCode() == 409 {
+					return false, nil
+				}
+			}
 			return shouldRetry(ctx, err)
 		})
 		if err != nil {
@@ -838,6 +845,16 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		fs.Debugf(o.f, "Upload succeeded, deleting backup file %s.%s (UUID: %s)", backupName, backupType, backupUUID)
 		err := o.f.pacer.Call(func() (bool, error) {
 			err := files.DeleteFile(ctx, o.f.cfg, backupUUID)
+			if err != nil {
+				var httpErr *sdkerrors.HTTPError
+				if errors.As(err, &httpErr) {
+					// Treat 404 (Not Found) and 204 (No Content) as success
+					switch httpErr.StatusCode() {
+					case 404, 204:
+						return false, nil
+					}
+				}
+			}
 			return shouldRetry(ctx, err)
 		})
 		if err != nil {
