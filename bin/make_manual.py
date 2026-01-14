@@ -92,7 +92,6 @@ docs = [
     "storj.md",
     "sugarsync.md",
     "ulozto.md",
-    "uptobox.md",
     "union.md",
     "webdav.md",
     "yandex.md",
