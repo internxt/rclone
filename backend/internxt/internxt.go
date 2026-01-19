@@ -722,6 +722,8 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 }
 
 func (f *Fs) Shutdown(ctx context.Context) error {
+	buckets.WaitForPendingThumbnails()
+
 	if f.tokenRenewer != nil {
 		f.tokenRenewer.Shutdown()
 	}
