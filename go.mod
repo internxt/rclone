@@ -45,7 +45,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/henrybear327/Proton-API-Bridge v1.0.0
 	github.com/henrybear327/go-proton-api v1.0.0
-	github.com/internxt/rclone-adapter v0.0.0-20260112121928-f210b9df5a42
+	github.com/internxt/rclone-adapter v0.0.0-20260119171815-eddb2c0aa71e
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/jlaffaye/ftp v0.2.1-0.20240918233326-1b970516f5d3
 	github.com/josephspurrier/goversioninfo v1.5.0
