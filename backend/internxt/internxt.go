@@ -932,7 +932,7 @@ func (o *Object) restoreBackupFile(ctx context.Context, backupUUID, origName, or
 		return
 	}
 
-	o.f.pacer.Call(func() (bool, error) {
+	_ = o.f.pacer.Call(func() (bool, error) {
 		err := files.RenameFile(ctx, o.f.cfg, backupUUID,
 			o.f.opt.Encoding.FromStandardName(origName), origType)
 		return shouldRetry(ctx, err)

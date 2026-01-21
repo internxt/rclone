@@ -1,4 +1,4 @@
-// Authentication handling for Internxt
+// Package internxt provides authentication handling
 package internxt
 
 import (
@@ -17,7 +17,6 @@ import (
 	internxtconfig "github.com/internxt/rclone-adapter/config"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/configmap"
-	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/lib/oauthutil"
 	"github.com/tyler-smith/go-bip39"
 	"golang.org/x/oauth2"
@@ -276,17 +275,6 @@ func refreshJWTToken(ctx context.Context, name string, m configmap.Mapper) error
 	currentToken, err := oauthutil.GetToken(name, m)
 	if err != nil {
 		return fmt.Errorf("failed to get current token: %w", err)
-	}
-
-	mnemonic, ok := m.Get("mnemonic")
-	if !ok || mnemonic == "" {
-		return errors.New("mnemonic is missing from configuration")
-	}
-
-	// Reveal the obscured mnemonic
-	mnemonic, err = obscure.Reveal(mnemonic)
-	if err != nil {
-		return fmt.Errorf("failed to reveal mnemonic: %w", err)
 	}
 
 	cfg := internxtconfig.NewDefaultToken(currentToken.AccessToken)
