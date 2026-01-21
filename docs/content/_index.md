@@ -31,8 +31,8 @@ mv, mount, ls, ncdu, tree, rm, and cat. Rclone's familiar syntax
 includes shell pipeline support, and `--dry-run` protection. It is
 used at the command line, in scripts or via its [API](/rc).
 
-Users call rclone _"The Swiss army knife of cloud storage"_, and
-_"Technology indistinguishable from magic"_.
+Users call rclone *"The Swiss army knife of cloud storage"*, and
+*Technology indistinguishable from magic"*.
 
 Rclone really looks after your data. It preserves timestamps and
 verifies checksums at all times. Transfers over limited bandwidth;
