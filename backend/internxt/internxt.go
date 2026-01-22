@@ -450,7 +450,12 @@ func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string) (*fol
 	}
 
 	if len(checkResult.Files) > 0 && checkResult.Files[0].FileExists() {
-		existingUUID := checkResult.Files[0].UUID
+		result := checkResult.Files[0]
+		if result.Type != ext {
+			return nil, nil
+		}
+
+		existingUUID := result.UUID
 		if existingUUID != "" {
 			fileMeta, err := files.GetFileMeta(ctx, f.cfg, existingUUID)
 			if err == nil && fileMeta != nil {
@@ -616,16 +621,14 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	if err != nil {
 		return nil, err
 	}
+	targetName := filepath.Base(remote)
 	for _, e := range files {
 		name := e.PlainName
 		if len(e.Type) > 0 {
 			name += "." + e.Type
 		}
 		decodedName := f.opt.Encoding.ToStandardName(name)
-		targetName := filepath.Base(remote)
-		match := decodedName == targetName
-
-		if match {
+		if decodedName == targetName {
 			return newObjectWithFile(f, remote, &e), nil
 		}
 	}
@@ -819,6 +822,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return shouldRetry(ctx, err)
 	})
 
+	if err != nil && isEmptyFileLimitError(err) {
+		o.restoreBackupFile(ctx, backupUUID, origName, origType)
+		return fs.ErrorCantUploadEmptyFiles
+	}
+
 	if err != nil {
 		meta, err = o.recoverFromTimeoutConflict(ctx, err, remote, dirID)
 	}
@@ -881,6 +889,13 @@ func isConflictError(err error) bool {
 	return strings.Contains(errMsg, "409") ||
 		strings.Contains(errMsg, "Conflict") ||
 		strings.Contains(errMsg, "already exists")
+}
+
+func isEmptyFileLimitError(err error) bool {
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "can not have more empty files") ||
+		strings.Contains(errMsg, "cannot have more empty files") ||
+		strings.Contains(errMsg, "you can not have empty files")
 }
 
 // recoverFromTimeoutConflict attempts to recover from a timeout or conflict error
