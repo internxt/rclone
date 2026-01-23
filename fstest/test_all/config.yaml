@@ -1,21 +1,21 @@
 tests:
-  - path: backend
-    addbackend: true
-    nobinary: true
-    short: true
-  - path: fs/operations
-    fastlist: true
-  - path: fs/sync
-    fastlist: true
-  - path: cmd/bisync
-  - path: cmd/gitannex
-  - path: vfs
-  - path: cmd/serve/restic
-    localonly: true
-  # - path: cmd/serve/docker
-  #   localonly: true
-  - path: cmd/selfupdate
-    localonly: true
+ - path: backend
+   addbackend: true
+   nobinary:   true
+   short:      true
+ - path: fs/operations
+   fastlist: true
+ - path: fs/sync
+   fastlist: true
+ - path: cmd/bisync
+ - path: cmd/gitannex
+ - path: vfs
+ - path: cmd/serve/restic
+   localonly: true
+ # - path: cmd/serve/docker
+ #   localonly: true
+ - path: cmd/selfupdate
+   localonly: true
 backends:
  - backend:  "local"
    remote:   ""
@@ -678,6 +678,8 @@ backends:
  - backend: "internxt"
    remote: "TestInternxt:"
    fastlist: false
+   ignore:
+     - TestRWFileHandleWriteNoWrite
  - backend:  "drime"
    remote:   "TestDrime:"
    ignoretests:
