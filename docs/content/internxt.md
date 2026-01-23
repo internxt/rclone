@@ -1,7 +1,7 @@
 ---
 title: "Internxt Drive"
 description: "Rclone docs for Internxt Drive"
-versionIntroduced: "v1.69"
+versionIntroduced: "v1.73"
 ---
 
 # {{< icon "fas fa-cloud" >}} Internxt Drive

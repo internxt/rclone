@@ -316,7 +316,6 @@ type Opt struct {
 	SkipDirectoryCheckWrap          bool     // if set skip DirectoryCheckWrap
 	SkipInvalidUTF8                 bool     // if set skip invalid UTF-8 checks
 	SkipLeadingDot                  bool     // if set skip leading dot checks
-	SkipTrailingDot                 bool     // if set skip trailing dot checks
 	QuickTestOK                     bool     // if set, run this test with make quicktest
 }
 
@@ -700,9 +699,6 @@ func Run(t *testing.T, opt *Opt) {
 						t.Skip("Skipping " + test.name)
 					}
 					if opt.SkipLeadingDot && test.name == "leading dot" {
-						t.Skip("Skipping " + test.name)
-					}
-					if opt.SkipTrailingDot && test.name == "trailing dot" {
 						t.Skip("Skipping " + test.name)
 					}
 

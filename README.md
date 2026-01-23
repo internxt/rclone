@@ -1,9 +1,6 @@
 <!-- markdownlint-disable-next-line first-line-heading no-inline-html -->
-
 [<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-light-mode-only)
-
 <!-- markdownlint-disable-next-line no-inline-html -->
-
 [<img src="https://rclone.org/img/logo_on_dark__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-dark-mode-only)
 
 [Website](https://rclone.org) |
@@ -21,7 +18,7 @@
 
 # Rclone
 
-Rclone _("rsync for cloud storage")_ is a command-line program to sync files and
+Rclone *("rsync for cloud storage")* is a command-line program to sync files and
 directories to and from different cloud storage providers.
 
 ## Storage providers

@@ -61,7 +61,7 @@ func init() {
 		Config:      Config,
 		Options: []fs.Option{
 			{
-				Name:     "skipHashValidation",
+				Name:     "skip_hash_validation",
 				Default:  true,
 				Advanced: true,
 				Help:     "Skip hash validation when downloading files.\n\nBy default, hash validation is disabled. Set this to false to enable validation.",
@@ -76,7 +76,7 @@ func init() {
 					encoder.EncodeRightPeriod |
 					encoder.EncodeDot |
 					encoder.EncodeCrLf,
-			},
+				},
 		}},
 	)
 }
@@ -150,7 +150,7 @@ type Options struct {
 	Token              string               `config:"token"`
 	Mnemonic           string               `config:"mnemonic"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
-	SkipHashValidation bool                 `config:"skipHashValidation"`
+	SkipHashValidation bool                 `config:"skip_hash_validation"`
 }
 
 // Fs represents an Internxt remote
