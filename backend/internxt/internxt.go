@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/internxt/rclone-adapter/auth"
 	"github.com/internxt/rclone-adapter/buckets"
 	config "github.com/internxt/rclone-adapter/config"
 	sdkerrors "github.com/internxt/rclone-adapter/errors"
@@ -58,99 +59,53 @@ func init() {
 		Name:        "internxt",
 		Description: "Internxt Drive",
 		NewFs:       NewFs,
-		Config:      Config,
-		Options: []fs.Option{
-			{
-				Name:     "skip_hash_validation",
-				Default:  true,
-				Advanced: true,
-				Help:     "Skip hash validation when downloading files.\n\nBy default, hash validation is disabled. Set this to false to enable validation.",
-			},
-			{
-				Name:     rclone_config.ConfigEncoding,
-				Help:     rclone_config.ConfigEncodingHelp,
-				Advanced: true,
-				Default: encoder.EncodeInvalidUtf8 |
-					encoder.EncodeSlash |
-					encoder.EncodeBackSlash |
-					encoder.EncodeRightPeriod |
-					encoder.EncodeDot |
-					encoder.EncodeCrLf,
-				},
+		Options: []fs.Option{{
+			Name:      "email",
+			Help:      "Email of your Internxt account.",
+			Required:  true,
+			Sensitive: true,
+		}, {
+			Name:       "pass",
+			Help:       "Password.",
+			Required:   true,
+			IsPassword: true,
+		}, {
+			Name: "2fa",
+			Help: "Two-factor authentication code (if enabled on your account).",
+		}, {
+			Name:      "mnemonic",
+			Help:      "Mnemonic (internal use only)",
+			Required:  false,
+			Advanced:  true,
+			Sensitive: true,
+			Hide:      fs.OptionHideBoth,
+		}, {
+			Name:     "skip_hash_validation",
+			Default:  true,
+			Advanced: true,
+			Help:     "Skip hash validation when downloading files.\n\nBy default, hash validation is disabled. Set this to false to enable validation.",
+		}, {
+			Name:     rclone_config.ConfigEncoding,
+			Help:     rclone_config.ConfigEncodingHelp,
+			Advanced: true,
+			Default: encoder.EncodeInvalidUtf8 |
+				encoder.EncodeSlash |
+				encoder.EncodeBackSlash |
+				encoder.EncodeRightPeriod |
+				encoder.EncodeDot |
+				encoder.EncodeCrLf,
 		}},
-	)
+	})
 }
 
-// Config implements the interactive configuration flow
-func Config(ctx context.Context, name string, m configmap.Mapper, configIn fs.ConfigIn) (*fs.ConfigOut, error) {
-	_, tokenOK := m.Get("token")
-	mnemonic, mnemonicOK := m.Get("mnemonic")
-
-	switch configIn.State {
-	case "":
-		// Check if we already have valid credentials
-		if tokenOK && mnemonicOK && mnemonic != "" {
-			// Get oauth2.Token from config
-			oauthToken, err := oauthutil.GetToken(name, m)
-			if err != nil {
-				fs.Errorf(nil, "Failed to get token: %v", err)
-				return fs.ConfigGoto("auth")
-			}
-
-			if time.Until(oauthToken.Expiry) < tokenExpiry2d {
-				fs.Logf(nil, "Token expires soon, attempting refresh...")
-				err := refreshJWTToken(ctx, name, m)
-				if err != nil {
-					fs.Errorf(nil, "Failed to refresh token: %v", err)
-					return fs.ConfigGoto("auth")
-				}
-				fs.Logf(nil, "Token refreshed successfully")
-				return nil, nil
-			}
-
-			// Token is valid - complete config without re-auth prompt
-			fs.Logf(nil, "Existing credentials are valid")
-			return nil, nil
-		}
-
-		return fs.ConfigGoto("auth")
-
-	case "auth":
-		newToken, newMnemonic, err := doAuth(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-
-		// Store mnemonic (obscured)
-		m.Set("mnemonic", obscure.MustObscure(newMnemonic))
-
-		// Store token in oauth2 format
-		oauthToken, err := jwtToOAuth2Token(newToken)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create oauth2 token: %w", err)
-		}
-
-		err = oauthutil.PutToken(name, m, oauthToken, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to save token: %w", err)
-		}
-
-		fs.Logf(nil, "")
-		fs.Logf(nil, "Success! Authentication complete.")
-		fs.Logf(nil, "")
-
-		return nil, nil
-	}
-
-	return nil, fmt.Errorf("unknown state %q", configIn.State)
-}
-
-// Options holds configuration options for this interface
+// Options defines the configuration for this backend
 type Options struct {
-	Token              string               `config:"token"`
+	Email              string               `config:"email"`
+	Pass               string               `config:"pass"`
+	TwoFA              string               `config:"2fa"`
 	Mnemonic           string               `config:"mnemonic"`
-	Encoding           encoder.MultiEncoder `config:"encoding"`
 	SkipHashValidation bool                 `config:"skip_hash_validation"`
+	Encoding           encoder.MultiEncoder `config:"encoding"`
 }
 
 // Fs represents an Internxt remote
@@ -208,20 +163,43 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
-	if opt.Mnemonic == "" {
-		return nil, errors.New("mnemonic is required - please run: rclone config reconnect " + name + ":")
+	if opt.Pass != "" {
+		var err error
+		opt.Pass, err = obscure.Reveal(opt.Pass)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't decrypt password: %w", err)
+		}
 	}
 
-	// Reveal the obscured mnemonic
-	var err error
-	opt.Mnemonic, err = obscure.Reveal(opt.Mnemonic)
-	if err != nil {
-		return nil, fmt.Errorf("failed to reveal mnemonic: %w", err)
+	if opt.Mnemonic == "" {
+		fs.Debugf(nil, "No stored mnemonic, performing login with email/password")
+		cfg := config.NewDefaultToken("")
+		loginResp, err := auth.DoLogin(ctx, cfg, opt.Email, opt.Pass, opt.TwoFA)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't login: %w", err)
+		}
+		m.Set("mnemonic", obscure.MustObscure(loginResp.User.Mnemonic))
+		opt.Mnemonic = loginResp.User.Mnemonic
+
+		oauthToken, err := jwtToOAuth2Token(loginResp.NewToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse token: %w", err)
+		}
+		err = oauthutil.PutToken(name, m, oauthToken, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save token: %w", err)
+		}
+	} else {
+		var err error
+		opt.Mnemonic, err = obscure.Reveal(opt.Mnemonic)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't decrypt mnemonic: %w", err)
+		}
 	}
 
 	oauthToken, err := oauthutil.GetToken(name, m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get token - please run: rclone config reconnect %s: - %w", name, err)
+		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
 	oauthConfig := &oauthutil.Config{
