@@ -21,6 +21,7 @@ import (
 	"github.com/internxt/rclone-adapter/folders"
 	"github.com/internxt/rclone-adapter/users"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/chunksize"
 	rclone_config "github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
@@ -30,15 +31,17 @@ import (
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
+	"github.com/rclone/rclone/lib/multipart"
 	"github.com/rclone/rclone/lib/oauthutil"
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/random"
 )
 
 const (
-	minSleep      = 10 * time.Millisecond
-	maxSleep      = 2 * time.Second
-	decayConstant = 2 // bigger for slower decay, exponential
+	minSleep       = 10 * time.Millisecond
+	maxSleep       = 2 * time.Second
+	decayConstant  = 2
+	maxUploadParts = 10000
 )
 
 // shouldRetry determines if an error should be retried.
@@ -101,6 +104,16 @@ func init() {
 			Default:  true,
 			Advanced: true,
 			Help:     "Skip hash validation when downloading files.\n\nBy default, hash validation is disabled. Set this to false to enable validation.",
+		}, {
+			Name:     "chunk_size",
+			Help:     "Chunk size for multipart uploads.\n\nLarge files will be uploaded in chunks of this size.\n\nMemory usage is approximately chunk_size * upload_concurrency.",
+			Default:  fs.SizeSuffix(30 * 1024 * 1024),
+			Advanced: true,
+		}, {
+			Name:     "upload_concurrency",
+			Help:     "Concurrency for multipart uploads.\n\nThis is the number of chunks of the same file that are uploaded concurrently.\n\nNote that each chunk is buffered in memory.",
+			Default:  4,
+			Advanced: true,
 		}, {
 			Name:     rclone_config.ConfigEncoding,
 			Help:     rclone_config.ConfigEncodingHelp,
@@ -194,24 +207,27 @@ type Options struct {
 	TwoFA              string               `config:"2fa"`
 	Mnemonic           string               `config:"mnemonic"`
 	SkipHashValidation bool                 `config:"skip_hash_validation"`
+	ChunkSize          fs.SizeSuffix        `config:"chunk_size"`
+	UploadConcurrency  int                  `config:"upload_concurrency"`
 	Encoding           encoder.MultiEncoder `config:"encoding"`
 }
 
 // Fs represents an Internxt remote
 type Fs struct {
-	name         string
-	root         string
-	opt          Options
-	m            configmap.Mapper
-	dirCache     *dircache.DirCache
-	cfg          *config.Config
-	features     *fs.Features
-	pacer        *fs.Pacer
-	tokenRenewer *oauthutil.Renew
-	bridgeUser   string
-	userID       string
-	authMu       sync.Mutex
-	authFailed   bool
+	name           string
+	root           string
+	opt            Options
+	m              configmap.Mapper
+	dirCache       *dircache.DirCache
+	cfg            *config.Config
+	features       *fs.Features
+	pacer          *fs.Pacer
+	tokenRenewer   *oauthutil.Renew
+	bridgeUser     string
+	userID         string
+	authMu         sync.Mutex
+	authFailed     bool
+	pendingSession *buckets.ChunkUploadSession
 }
 
 // Object holds the data for a remote file object
@@ -333,6 +349,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
+		OpenChunkWriter:         f.OpenChunkWriter,
 	}).Fill(ctx, f)
 
 	if ts != nil {
@@ -884,32 +901,74 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		fs.Debugf(o.f, "Renamed existing file %s to backup %s.%s (UUID: %s)", remote, backupName, backupType, backupUUID)
 	}
 
+	size := src.Size()
+
 	var meta *buckets.CreateMetaResponse
-	err = o.f.pacer.CallNoRetry(func() (bool, error) {
-		var err error
-		meta, err = buckets.UploadFileStreamAuto(ctx,
-			o.f.cfg,
-			dirID,
-			o.f.opt.Encoding.FromStandardName(path.Base(remote)),
-			in,
-			src.Size(),
-			src.ModTime(ctx),
-		)
-		return o.f.shouldRetry(ctx, err)
-	})
+	if size >= int64(o.f.opt.ChunkSize) {
+		// Use multipart upload for large files
+		chunkSize := chunksize.Calculator(src, size, maxUploadParts, o.f.opt.ChunkSize)
+		var session *buckets.ChunkUploadSession
+		err = o.f.pacer.Call(func() (bool, error) {
+			var err error
+			session, err = buckets.NewChunkUploadSession(ctx, o.f.cfg, size, int64(chunkSize))
+			return o.f.shouldRetry(ctx, err)
+		})
+		if err != nil {
+			o.restoreBackupFile(ctx, backupUUID, origName, origType)
+			return fmt.Errorf("failed to create upload session: %w", err)
+		}
 
-	if err != nil && isEmptyFileLimitError(err) {
-		o.restoreBackupFile(ctx, backupUUID, origName, origType)
-		return fs.ErrorCantUploadEmptyFiles
-	}
+		// Wrap reader with SDK's encrypting reader
+		encReader := session.EncryptingReader(in)
 
-	if err != nil {
-		meta, err = o.recoverFromTimeoutConflict(ctx, err, remote, dirID)
-	}
+		// Store session for OpenChunkWriter to pick up
+		o.f.pendingSession = session
 
-	if err != nil {
-		o.restoreBackupFile(ctx, backupUUID, origName, origType)
-		return err
+		chunkWriter, uploadErr := multipart.UploadMultipart(ctx, src, encReader, multipart.UploadMultipartOptions{
+			Open:        o.f,
+			OpenOptions: options,
+		})
+
+		o.f.pendingSession = nil
+
+		if uploadErr != nil {
+			if isEmptyFileLimitError(uploadErr) {
+				o.restoreBackupFile(ctx, backupUUID, origName, origType)
+				return fs.ErrorCantUploadEmptyFiles
+			}
+			o.restoreBackupFile(ctx, backupUUID, origName, origType)
+			return uploadErr
+		}
+		w := chunkWriter.(*internxtChunkWriter)
+		meta = w.meta
+	} else {
+		// Use single-part upload for small files
+		err = o.f.pacer.CallNoRetry(func() (bool, error) {
+			var err error
+			meta, err = buckets.UploadFileStreamAuto(ctx,
+				o.f.cfg,
+				dirID,
+				o.f.opt.Encoding.FromStandardName(path.Base(remote)),
+				in,
+				size,
+				src.ModTime(ctx),
+			)
+			return o.f.shouldRetry(ctx, err)
+		})
+
+		if err != nil && isEmptyFileLimitError(err) {
+			o.restoreBackupFile(ctx, backupUUID, origName, origType)
+			return fs.ErrorCantUploadEmptyFiles
+		}
+
+		if err != nil {
+			meta, err = o.recoverFromTimeoutConflict(ctx, err, remote, dirID)
+		}
+
+		if err != nil {
+			o.restoreBackupFile(ctx, backupUUID, origName, origType)
+			return err
+		}
 	}
 
 	// Update object metadata
