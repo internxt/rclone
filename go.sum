@@ -429,6 +429,8 @@ github.com/internxt/rclone-adapter v0.0.0-20260226152911-72b83123f8e9 h1:lxVac1u
 github.com/internxt/rclone-adapter v0.0.0-20260226152911-72b83123f8e9/go.mod h1:vdPya4AIcDjvng4ViaAzqjegJf0VHYpYHQguFx5xBp0=
 github.com/internxt/rclone-adapter v0.0.0-20260303161852-4b337f11972d h1:dMd7BPNXvz73BBwYSvqInndDkW+q8OAUu8+zSClYtEs=
 github.com/internxt/rclone-adapter v0.0.0-20260303161852-4b337f11972d/go.mod h1:vdPya4AIcDjvng4ViaAzqjegJf0VHYpYHQguFx5xBp0=
+github.com/internxt/rclone-adapter v0.0.0-20260316170255-0cc0b8f65dee h1:Crt8J2oP3i6x5z6wkdS8jKTZ7lLhE3nhLNnq676rBvg=
+github.com/internxt/rclone-adapter v0.0.0-20260316170255-0cc0b8f65dee/go.mod h1:vdPya4AIcDjvng4ViaAzqjegJf0VHYpYHQguFx5xBp0=
 github.com/jcmturner/aescts/v2 v2.0.0 h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=
 github.com/jcmturner/aescts/v2 v2.0.0/go.mod h1:AiaICIRyfYg35RUkr8yESTqvSy7csK90qZ5xfvvsoNs=
 github.com/jcmturner/dnsutils/v2 v2.0.0 h1:lltnkeZGL0wILNvrNiVCR6Ro5PGU/SeBvVO/8c/iPbo=
