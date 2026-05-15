@@ -428,6 +428,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/internxt/rclone-adapter v0.0.0-20260331173834-036f908d0160 h1:PV6ipOJN0JIek4dqPqsTtenQmjI1SZntCUgPzhfk9gM=
 github.com/internxt/rclone-adapter v0.0.0-20260331173834-036f908d0160/go.mod h1:yRuPDnHgGmsbvopF0amMqXxr4n32GynzX5GTwFYDHaw=
+github.com/internxt/rclone-adapter v0.0.0-20260518132537-c53845d4477a h1:7CJDR4n8IDdrRdFRteP7pa/Pe2YDNpV5aEy2riUMJjQ=
+github.com/internxt/rclone-adapter v0.0.0-20260518132537-c53845d4477a/go.mod h1:yRuPDnHgGmsbvopF0amMqXxr4n32GynzX5GTwFYDHaw=
 github.com/jcmturner/aescts/v2 v2.0.0 h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=
 github.com/jcmturner/aescts/v2 v2.0.0/go.mod h1:AiaICIRyfYg35RUkr8yESTqvSy7csK90qZ5xfvvsoNs=
 github.com/jcmturner/dnsutils/v2 v2.0.0 h1:lltnkeZGL0wILNvrNiVCR6Ro5PGU/SeBvVO/8c/iPbo=
